@@ -11,6 +11,7 @@ import { initialPreferenceState, recordPreference } from './preference';
 import type { LayoutCandidate } from './generator';
 import { applyInducedRules, induceRules } from '../rules/induction';
 import { measureGeneralization, measureInductionHoldout, measurePreferenceGain } from './metrics';
+import { loadJson, saveJson, type JsonStorage } from '../shared/storage';
 
 describe('element orientation', () => {
   it('derives service sides only from wall-routed connections', () => {
@@ -243,6 +244,31 @@ describe('MVP metrics', () => {
     expect(measurePreferenceGain(state)).toBeGreaterThan(0);
   });
 });
+
+describe('JSON storage', () => {
+  it('round-trips JSON values through a Storage-like adapter', () => {
+    const storage = memoryStorage();
+
+    saveJson(storage, 'project', { W: 1900, wetWall: 'S' });
+
+    expect(loadJson(storage, 'project', { W: 0 })).toEqual({ W: 1900, wetWall: 'S' });
+  });
+
+  it('returns fallback for invalid JSON', () => {
+    const storage = memoryStorage();
+    storage.setItem('bad', '{not-json');
+
+    expect(loadJson(storage, 'bad', { ok: true })).toEqual({ ok: true });
+  });
+});
+
+function memoryStorage(): JsonStorage {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  };
+}
 
 function candidateWith(ev: { halo: number; drain: number; score: number }): LayoutCandidate {
   return {

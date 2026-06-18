@@ -9,6 +9,7 @@ import { initialPreferenceState, rankByPreference, recordPreference } from "./en
 import { measureGeneralization, measureInductionHoldout, measurePreferenceGain } from "./engine/metrics";
 import { applyInducedRules, induceRules, parseReferenceJson } from "./rules/induction";
 import { clamp, uid } from "./shared/math";
+import { loadJson, saveJson } from "./shared/storage";
 
 /* =========================================================================
    ZAKLENJEN SISTEM â€” harmonika orehov
@@ -18,7 +19,7 @@ import { clamp, uid } from "./shared/math";
 
 /* ===================== APP â€” harmonika ===================== */
 export default function App(){
-  const [library,setLibrary]=useState(baseLib());
+  const [library,setLibrary]=usePersistentState("floorplanner.library",baseLib);
   const [open,setOpen]=useState("O2");
   const steps=[
     {id:"O1",title:"Model elementa",sub:"priklopi doloÄajo orientacijo Â· clearance kot spekter",status:"deluje"},
@@ -53,6 +54,12 @@ export default function App(){
   );
 }
 
+function usePersistentState(key,initial){
+  const [value,setValue]=useState(()=>loadJson(typeof window==="undefined"?undefined:window.localStorage,key,typeof initial==="function"?initial():initial));
+  useEffect(()=>saveJson(typeof window==="undefined"?undefined:window.localStorage,key,value),[key,value]);
+  return [value,setValue];
+}
+
 function Soon({id}){
   const txt=id==="O5"
     ? "Routing instalacij je aktiven v O2 pogledu: trase teÄejo od dejanskih priklopnih toÄk do mokrega zidu, z dolÅ¾inami, politiko talnih tras in oznaÄenimi kriÅ¾anji."
@@ -70,9 +77,9 @@ const SAMPLE_REFS = JSON.stringify([
 ],null,2);
 
 function O9({library,setLibrary}){
-  const [raw,setRaw]=useState(SAMPLE_REFS);
-  const [rules,setRules]=useState([]);
-  const [metrics,setMetrics]=useState(null);
+  const [raw,setRaw]=usePersistentState("floorplanner.o9.references",SAMPLE_REFS);
+  const [rules,setRules]=usePersistentState("floorplanner.o9.rules",[]);
+  const [metrics,setMetrics]=usePersistentState("floorplanner.o9.metrics",null);
   const [err,setErr]=useState("");
   const run=()=>{
     try{
@@ -207,14 +214,14 @@ function O1({library,setLibrary}){
 
 /* ===================== O2 â€” postavitev ===================== */
 function O2({library}){
-  const [W,setW]=useState(1900),[D,setD]=useState(2200),[wet,setWet]=useState("S");
-  const [prog,setProg]=useState([{id:uid(),key:"door",w:800,dir:"auto",wall:"auto",hinge:"auto"},{id:uid(),key:"toilet"},{id:uid(),key:"sink"}]);
-  const [soft,setSoft]=useState(true);
-  const [allowFloorRoutes,setAllowFloorRoutes]=useState(true);
-  const [zones,setZones]=useState([]);
+  const [W,setW]=usePersistentState("floorplanner.project.W",1900),[D,setD]=usePersistentState("floorplanner.project.D",2200),[wet,setWet]=usePersistentState("floorplanner.project.wetWall","S");
+  const [prog,setProg]=usePersistentState("floorplanner.project.program",()=>[{id:uid(),key:"door",w:800,dir:"auto",wall:"auto",hinge:"auto"},{id:uid(),key:"toilet"},{id:uid(),key:"sink"}]);
+  const [soft,setSoft]=usePersistentState("floorplanner.project.soft",true);
+  const [allowFloorRoutes,setAllowFloorRoutes]=usePersistentState("floorplanner.project.allowFloorRoutes",true);
+  const [zones,setZones]=usePersistentState("floorplanner.project.zones",[]);
   const setZone=(id,patch)=>setZones(Z=>Z.map(z=>z.id===id?{...z,...patch}:z));
   const [pool,setPool]=useState([]); const [idx,setIdx]=useState(0); const [seed,setSeed]=useState(0);
-  const [pref,setPref]=useState(initialPreferenceState());
+  const [pref,setPref]=usePersistentState("floorplanner.preference",initialPreferenceState);
   const cfg=useMemo(()=>({W,D,wetWall:wet,minAisle:800}),[W,D,wet]);
   const feasibility=useMemo(()=>checkFeasibility(library,prog,cfg,zones),[library,prog,cfg,zones]);
 
