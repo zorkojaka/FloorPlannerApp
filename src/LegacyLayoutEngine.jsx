@@ -6,6 +6,7 @@ import { generateLayoutPool } from "./engine/generator";
 import { routeServices } from "./engine/routing";
 import { checkFeasibility } from "./engine/feasibility";
 import { initialPreferenceState, rankByPreference, recordPreference } from "./engine/preference";
+import { nextPair, suggestedExplore } from "./engine/active";
 import { measureGeneralization, measureInductionHoldout, measurePreferenceGain } from "./engine/metrics";
 import { defaultChannels, effectiveWeight, learnChannelsFromPreference, rankByChannels, scoreCandidateChannels } from "./engine/channels";
 import { applyInducedRules, induceRules, parseReferenceJson } from "./rules/induction";
@@ -272,7 +273,9 @@ function O2({library}){
   const cornerEls=prog.filter(p=>{const e=library[p.key];return e&&!isDoor(e)&&serviceSides(e).length>1;});
   const hasDoor=prog.some(p=>isDoor(library[p.key]));
   const best=pool[idx];
-  const optionA=pool[0], optionB=pool[1];
+  const [explore,setExplore]=usePersistentState("floorplanner.explore",0.7);
+  const abPair=useMemo(()=>nextPair(pool,channels,cfg,explore),[pool,channels,cfg,explore]);
+  const optionA=abPair?.a, optionB=abPair?.b;
   const bestChannelScores=best?scoreCandidateChannels(best,channels,cfg):null;
   const routing=useMemo(()=>best?routeServices(best.placed,cfg,{allowFloorRoutes}):null,[best,cfg,allowFloorRoutes]);
   const choosePreference=(selected,rejected)=>setPref(prev=>{
@@ -355,11 +358,17 @@ function O2({library}){
             <span>{r.fixtureName} · {CONN[r.connection.type].short} · {r.via==="floor"?"tla":"zid"}</span>
             <b className="mono">{(r.length/1000).toFixed(2)} m</b>
           </div>)}</div>
-          <div className="eyebrow mt">A/B preference</div>
+          <div className="eyebrow mt">A/B preference · aktivno učenje</div>
           {optionA&&optionB ? <div className="abBox">
             <div className="abBtns">
               <button onClick={()=>choosePreference(optionA,optionB)}>A <span className="mono">{(optionA.ev.score*100|0)}</span></button>
               <button onClick={()=>choosePreference(optionB,optionA)}>B <span className="mono">{(optionB.ev.score*100|0)}</span></button>
+            </div>
+            <div className="exploreRow">
+              <span>raziskovanje <b className="mono">{Math.round(explore*100)}</b> · izkoriščanje <b className="mono">{Math.round((1-explore)*100)}</b></span>
+              <input type="range" min="0" max="1" step="0.05" value={explore} onChange={e=>setExplore(+e.target.value)} style={{width:"100%",accentColor:"#5aa9e6"}}/>
+              <span className="abHint">{explore>0.66?"Ugani kdo: par, ki najbolj prepolovi negotovost":explore<0.34?"izkoriščanje: kaže najboljši par":"mešano: informativno + kvaliteta"} · donos para <b className="mono">{(abPair.info*100|0)}</b></span>
+              <button className="microBtn" onClick={()=>setExplore(suggestedExplore(pref.comparisons))}>predlagaj ({Math.round(suggestedExplore(pref.comparisons)*100)})</button>
             </div>
             <div className="prefBars">
               <span>halo <b className="mono">{Math.round(pref.weights.halo*100)}</b></span>

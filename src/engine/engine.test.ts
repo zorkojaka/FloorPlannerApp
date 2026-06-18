@@ -15,6 +15,8 @@ import { loadJson, saveJson, type JsonStorage } from '../shared/storage';
 import { defaultChannels, effectiveWeight, learnChannelsFromPreference, rankByChannels } from './channels';
 import { collides3D, humanUsageBox, overlapVolume } from './volume';
 import { buildFreeGrid, corridorWidth, reachable } from './freespace';
+import { nextPair, pairInformation, suggestedExplore } from './active';
+import { fromRoomConstraints, type RoomConstraints } from '../constraints/brief';
 
 describe('element orientation', () => {
   it('derives service sides only from wall-routed connections', () => {
@@ -411,6 +413,87 @@ describe('3.0 walkability (rang 1 prehodnost)', () => {
     const from = { x: 1500, y: 300 };
     const to = { x: 1500, y: 2700 };
     expect(corridorWidth(open, from, to)).toBeGreaterThan(corridorWidth(narrow, from, to));
+  });
+});
+
+describe('4.0 active learning (Ugani kdo)', () => {
+  const cfg = { W: 1900, D: 2200, wetWall: 'S' as const, minAisle: 800 };
+  // en sam vklopljen, negotov kanal (drain-distance, nizko zaupanje); pri praznem
+  // placed je njegova vrednost determinirana funkcija ev.drain.
+  function singleUncertainChannel() {
+    return defaultChannels().map((channel) =>
+      channel.id === 'drain-distance'
+        ? { ...channel, enabled: true, prior: 0.5, learned: 0.5, confidence: 0.1 }
+        : { ...channel, enabled: false },
+    );
+  }
+
+  it('returns null when there are fewer than two candidates', () => {
+    expect(nextPair([candidateWith({ halo: 0, drain: 100, score: 0.5 })], defaultChannels(), cfg)).toBeNull();
+  });
+
+  it('explore=1 picks the pair that most splits uncertainty', () => {
+    const channels = singleUncertainChannel();
+    const near = candidateWith({ halo: 0, drain: 200, score: 0.9 });
+    const mid = candidateWith({ halo: 0, drain: 1100, score: 0.6 });
+    const far = candidateWith({ halo: 0, drain: 2100, score: 0.3 });
+
+    const pair = nextPair([near, mid, far], channels, cfg, 1)!;
+    const chosen = new Set([pair.a, pair.b]);
+
+    expect(chosen.has(near)).toBe(true);
+    expect(chosen.has(far)).toBe(true); // največja razlika po negotovem kanalu
+  });
+
+  it('explore=0 picks the two highest-quality candidates', () => {
+    const channels = singleUncertainChannel();
+    const near = candidateWith({ halo: 0, drain: 200, score: 0.9 });
+    const mid = candidateWith({ halo: 0, drain: 1100, score: 0.6 });
+    const far = candidateWith({ halo: 0, drain: 2100, score: 0.3 });
+
+    const pair = nextPair([near, mid, far], channels, cfg, 0)!;
+    const chosen = new Set([pair.a, pair.b]);
+
+    expect(chosen.has(near)).toBe(true);
+    expect(chosen.has(mid)).toBe(true); // najnižji odtok = najvišja kvaliteta
+    expect(chosen.has(far)).toBe(false);
+  });
+
+  it('pair information grows with channel uncertainty', () => {
+    const a = candidateWith({ halo: 0, drain: 200, score: 0.9 });
+    const b = candidateWith({ halo: 0, drain: 2100, score: 0.3 });
+    const certain = singleUncertainChannel().map((c) => ({ ...c, confidence: 0.95 }));
+    const uncertain = singleUncertainChannel();
+
+    expect(pairInformation(a, b, uncertain, cfg)).toBeGreaterThan(pairInformation(a, b, certain, cfg));
+  });
+
+  it('suggests more exploration early and less later', () => {
+    expect(suggestedExplore(0)).toBeGreaterThan(suggestedExplore(10));
+    expect(suggestedExplore(100)).toBe(0);
+  });
+});
+
+describe('4.0 per-room constraints interface', () => {
+  it('splits a RoomConstraints object into generator inputs', () => {
+    const rc: RoomConstraints = {
+      W: 1900,
+      D: 2200,
+      wetWall: 'S',
+      extWall: 'N',
+      minAisle: 800,
+      doors: [{ id: 'd', key: 'door', w: 800 }],
+      fixtures: [{ id: 't', key: 'toilet' }, { id: 's', key: 'sink' }],
+      zones: [{ id: 'z', x: 100, y: 100, w: 300, h: 300 }],
+      routingPolicy: { floorAllowed: false },
+    };
+
+    const split = fromRoomConstraints(rc);
+
+    expect(split.cfg).toEqual({ W: 1900, D: 2200, wetWall: 'S', minAisle: 800 });
+    expect(split.program.map((p) => p.key)).toEqual(['door', 'toilet', 'sink']);
+    expect(split.zones).toHaveLength(1);
+    expect(split.routingPolicy.floorAllowed).toBe(false);
   });
 });
 
