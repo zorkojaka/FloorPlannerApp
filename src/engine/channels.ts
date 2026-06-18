@@ -2,6 +2,7 @@ import type { LayoutCandidate } from './generator';
 import type { RoomConfig } from '../constraints/brief';
 import type { PlacedFixture } from './evaluator';
 import { distanceToWall } from './geometry';
+import { humanUsageBox } from './volume';
 
 export type ChannelFamily = 'distance' | 'relational' | 'topology' | 'distribution' | 'alignment';
 export type ChannelScope = 'global' | 'room-type';
@@ -61,6 +62,26 @@ export function defaultChannels(): Channel[] {
       learned: 0.3,
       confidence: 0.55,
     },
+    {
+      id: 'passing-while-used',
+      name: 'Mimohod med uporabo',
+      family: 'topology',
+      scope: 'global',
+      enabled: true,
+      prior: 0.16,
+      learned: 0.16,
+      confidence: 0.35,
+    },
+    {
+      id: 'daylight-access',
+      name: 'Dostop do svetlobe',
+      family: 'distance',
+      scope: 'room-type',
+      enabled: true,
+      prior: 0.12,
+      learned: 0.12,
+      confidence: 0.45,
+    },
   ];
 }
 
@@ -103,6 +124,8 @@ export function measureChannel(channelId: string, candidate: LayoutCandidate, cf
   if (channelId === 'drain-distance') return measureDrainDistance(candidate, cfg);
   if (channelId === 'same-category-cluster') return measureSameCategoryCluster(candidate, cfg);
   if (channelId === 'space-distribution') return measureSpaceDistribution(candidate, cfg);
+  if (channelId === 'passing-while-used') return measurePassingWhileUsed(candidate, cfg);
+  if (channelId === 'daylight-access') return measureDaylightAccess(candidate, cfg);
   return candidate.ev.score;
 }
 
@@ -157,6 +180,32 @@ function measureSpaceDistribution(candidate: LayoutCandidate, cfg: RoomConfig): 
   const centroid = { x: weighted.x / weighted.area, y: weighted.y / weighted.area };
   const distance = Math.hypot(centroid.x - roomCenter.x, centroid.y - roomCenter.y);
   return 1 - Math.min(1, distance / Math.hypot(cfg.W / 2, cfg.D / 2));
+}
+
+function measurePassingWhileUsed(candidate: LayoutCandidate, cfg: RoomConfig): number {
+  const humanBoxes = fixtures(candidate).map(humanUsageBox).filter(Boolean);
+  if (humanBoxes.length === 0) return 1;
+  const occupiedWidth = humanBoxes.reduce((sum, box) => sum + Math.min(box!.w, box!.h), 0);
+  const corridor = Math.min(cfg.W, cfg.D);
+  return 1 - Math.min(1, occupiedWidth / Math.max(corridor, 1));
+}
+
+function measureDaylightAccess(candidate: LayoutCandidate, cfg: RoomConfig): number {
+  const items = fixtures(candidate);
+  const windows = items.filter((item) => item.el.kind === 'window');
+  const users = items.filter((item) => item.el.usage?.posture && item.el.usage.posture !== 'none');
+  if (windows.length === 0 || users.length === 0) return 0.5;
+  const diagonal = Math.hypot(cfg.W, cfg.D);
+  const average = users.reduce((sum, user) => {
+    const userCenter = { x: user.foot.x + user.foot.w / 2, y: user.foot.y + user.foot.h / 2 };
+    const nearest = Math.min(
+      ...windows.map((window) =>
+        Math.hypot(userCenter.x - (window.foot.x + window.foot.w / 2), userCenter.y - (window.foot.y + window.foot.h / 2)),
+      ),
+    );
+    return sum + nearest;
+  }, 0) / users.length;
+  return 1 - Math.min(1, average / diagonal);
 }
 
 function centerDistance(a: PlacedFixture, b: PlacedFixture): number {

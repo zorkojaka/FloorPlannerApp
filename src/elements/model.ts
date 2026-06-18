@@ -4,6 +4,8 @@ export type ConnectionType = 'water-in' | 'water-out' | 'electric' | 'vent';
 export type Side = 'back' | 'front' | 'left' | 'right';
 export type Wall = 'N' | 'E' | 'S' | 'W';
 export type Source = 'default' | 'ifc' | 'user';
+export type ElementKind = 'door' | 'window';
+export type HumanPosture = 'standing' | 'seated' | 'none';
 
 export interface Connection {
   id: string;
@@ -15,13 +17,20 @@ export interface Connection {
 
 export interface Element {
   category: string;
-  kind?: 'door';
+  kind?: ElementKind;
   name: string;
   w: number;
   d: number;
+  z: number;
+  h: number;
   source: Source;
   conns: Connection[];
   clear: Envelope;
+  usage?: {
+    posture: HumanPosture;
+    userAt: 'front';
+  };
+  parapet?: number;
 }
 
 export interface OrientationResult {
@@ -46,6 +55,10 @@ export const SIDE_LABELS: Record<Side, string> = {
 
 export function isDoor(element: Element | undefined): boolean {
   return element?.kind === 'door';
+}
+
+export function isWindow(element: Element | undefined): boolean {
+  return element?.kind === 'window';
 }
 
 export function serviceSides(element: Element): Side[] {

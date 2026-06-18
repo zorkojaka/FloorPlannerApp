@@ -13,6 +13,7 @@ import { applyInducedRules, induceRules } from '../rules/induction';
 import { measureGeneralization, measureInductionHoldout, measurePreferenceGain } from './metrics';
 import { loadJson, saveJson, type JsonStorage } from '../shared/storage';
 import { defaultChannels, effectiveWeight, learnChannelsFromPreference, rankByChannels } from './channels';
+import { collides3D, humanUsageBox, overlapVolume } from './volume';
 
 describe('element orientation', () => {
   it('derives service sides only from wall-routed connections', () => {
@@ -277,7 +278,7 @@ describe('channel test bench', () => {
     const next = learnChannelsFromPreference(channels, selected, rejected, { W: 1900, D: 2200, wetWall: 'S', minAisle: 800 });
 
     expect(next.find((channel) => channel.id === 'drain-distance')!.learned).toBeGreaterThan(
-      channels.find((channel) => channel.id === 'drain-distance')!.learned,
+      next.find((channel) => channel.id === 'same-category-cluster')!.learned,
     );
   });
 
@@ -289,6 +290,31 @@ describe('channel test bench', () => {
     const bad = candidateWith({ halo: 0, drain: 3000, score: 0.9 });
 
     expect(rankByChannels([bad, good], channels, { W: 1900, D: 2200, wetWall: 'S', minAisle: 800 })[0]).toBe(good);
+  });
+});
+
+describe('3D human and window model', () => {
+  it('treats stacked boxes as non-colliding when their heights do not overlap', () => {
+    expect(overlapVolume({ x: 0, y: 0, w: 500, h: 500, z: 0, h3: 800 }, { x: 0, y: 0, w: 500, h: 500, z: 900, h3: 400 })).toBe(0);
+    expect(collides3D({ x: 0, y: 0, w: 500, h: 500, z: 0, h3: 1200 }, { x: 0, y: 0, w: 500, h: 500, z: 900, h3: 400 })).toBe(true);
+  });
+
+  it('creates a human usage box in front of a fixture', () => {
+    const library = baseLib();
+    const sink = placeRects(library.sink, 'N', 200, 1900, 2200);
+    const placedSink: PlacedFixture = { ...sink, el: library.sink, wall: 'N', name: library.sink.name };
+
+    const human = humanUsageBox(placedSink);
+
+    expect(human).toMatchObject({ z: 0, h3: 1900 });
+    expect(human!.y).toBeGreaterThan(placedSink.foot.y);
+  });
+
+  it('includes the new 3.0 channels in the test bench', () => {
+    const ids = defaultChannels().map((channel) => channel.id);
+
+    expect(ids).toContain('passing-while-used');
+    expect(ids).toContain('daylight-access');
   });
 });
 

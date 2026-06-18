@@ -57,10 +57,32 @@ export default function App(){
 }
 
 function normalizeLibraryText(library){
-  if(library.toilet?.name!=="WC skoljka") return library;
+  const defaults=baseLib();
+  let changed=false;
   const next=JSON.parse(JSON.stringify(library));
-  next.toilet.name="WC školjka";
-  return next;
+  for(const [key,def] of Object.entries(defaults)){
+    if(!next[key]){next[key]=def;changed=true;continue;}
+    for(const prop of ["z","h","usage","parapet"]){
+      if(def[prop]!==undefined&&next[key][prop]===undefined){next[key][prop]=def[prop];changed=true;}
+    }
+  }
+  if(next.toilet?.name==="WC skoljka"){next.toilet.name="WC školjka";changed=true;}
+  return changed?next:library;
+}
+
+function normalizeChannels(channels){
+  const defaults=defaultChannels();
+  let changed=false;
+  const byId=new Map(channels.map(c=>[c.id,c]));
+  const next=defaults.map(def=>{
+    const current=byId.get(def.id);
+    if(!current){changed=true;return def;}
+    const merged={...def,...current};
+    if(current.name!==def.name){merged.name=def.name;changed=true;}
+    return merged;
+  });
+  if(next.length!==channels.length) changed=true;
+  return changed?next:channels;
 }
 
 function usePersistentState(key,initial){
@@ -202,6 +224,11 @@ function O1({library,setLibrary}){
         <div className="eyebrow">Dimenzije</div>
         <Num label="Širina" v={el.w} set={v=>patch(e=>e.w=v)} min={250} max={2000} step={10}/>
         <Num label="Globina" v={el.d} set={v=>patch(e=>e.d=v)} min={250} max={2500} step={10}/>
+        <Num label="Višina" v={el.h??0} set={v=>patch(e=>e.h=v)} min={0} max={3000} step={50}/>
+        <Num label="Z odmik" v={el.z??0} set={v=>patch(e=>e.z=v)} min={0} max={2500} step={50}/>
+        {el.kind==="window"&&<Num label="Parapet" v={el.parapet??900} set={v=>patch(e=>{e.parapet=v;e.z=v;})} min={0} max={1800} step={50}/>}
+        <div className="eyebrow mt">Uporaba</div>
+        <div className="rt3 wrap">{["none","standing","seated"].map(p=><button key={p} className={(el.usage?.posture||"none")===p?"on":""} onClick={()=>patch(e=>e.usage={posture:p,userAt:"front"})}>{p==="none"?"brez":p==="standing"?"stoje":"sede"}</button>)}</div>
         <div className="eyebrow mt">Priklopi</div>
         {el.conns.map(c=>(
           <div key={c.id} className={"conn "+(selConn===c.id?"on":"")} onClick={()=>setSelConn(c.id)}>
@@ -232,6 +259,7 @@ function O2({library}){
   const [pool,setPool]=useState([]); const [idx,setIdx]=useState(0); const [seed,setSeed]=useState(0);
   const [pref,setPref]=usePersistentState("floorplanner.preference",initialPreferenceState);
   const [channels,setChannels]=usePersistentState("floorplanner.channels",defaultChannels);
+  useEffect(()=>setChannels(C=>normalizeChannels(C)),[setChannels]);
   const cfg=useMemo(()=>({W,D,wetWall:wet,minAisle:800}),[W,D,wet]);
   const feasibility=useMemo(()=>checkFeasibility(library,prog,cfg,zones),[library,prog,cfg,zones]);
 
@@ -424,7 +452,7 @@ function Door({p,W,D}){
 
 /* ===================== mali gradniki ===================== */
 function ZNum({label,v,set,max}){ return <label className="znum"><span>{label}</span><input type="range" min="0" max={max} step="50" value={v} onChange={e=>set(+e.target.value)}/><b className="mono">{v}</b></label>; }
-function Num({label,v,set,min,max,step,c}){ return <div className="num"><div className="fhd"><span>{label}</span><span className="mono" style={c?{color:c}:{}}>{v}{label.match(/Širina|Globina|Jedro|Halo/)?" mm":""}</span></div><input type="range" min={min} max={max} step={step} value={v} onChange={e=>set(+e.target.value)} style={c?{accentColor:c}:{}}/></div>; }
+function Num({label,v,set,min,max,step,c}){ return <div className="num"><div className="fhd"><span>{label}</span><span className="mono" style={c?{color:c}:{}}>{v}{label.match(/Širina|Globina|Višina|Z odmik|Parapet|Jedro|Halo/)?" mm":""}</span></div><input type="range" min={min} max={max} step={step} value={v} onChange={e=>set(+e.target.value)} style={c?{accentColor:c}:{}}/></div>; }
 
 const CSS=`
 .app{--bg:#0f1419;--panel:#161c23;--p2:#1b222b;--bd:#252e39;--tx:#d7dee6;--mut:#7c8794;--cy:#16b3b3;
