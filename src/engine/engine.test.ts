@@ -10,6 +10,7 @@ import { placedConnectionPoint, routeServices } from './routing';
 import { initialPreferenceState, recordPreference } from './preference';
 import type { LayoutCandidate } from './generator';
 import { applyInducedRules, induceRules } from '../rules/induction';
+import { measureGeneralization, measureInductionHoldout, measurePreferenceGain } from './metrics';
 
 describe('element orientation', () => {
   it('derives service sides only from wall-routed connections', () => {
@@ -207,6 +208,39 @@ describe('rule induction', () => {
 
     expect(next.toilet.clear.halo).not.toBe(library.toilet.clear.halo);
     expect(next.toilet.source).toBe('ifc');
+  });
+});
+
+describe('MVP metrics', () => {
+  it('reports holdout induction quality as a bounded score', () => {
+    const metric = measureInductionHoldout([
+      { ref: 'a', elementKey: 'toilet', parameter: 'clearance-front', value: 650 },
+      { ref: 'b', elementKey: 'toilet', parameter: 'clearance-front', value: 670 },
+      { ref: 'c', elementKey: 'toilet', parameter: 'clearance-front', value: 690 },
+      { ref: 'd', elementKey: 'toilet', parameter: 'clearance-front', value: 700 },
+    ]);
+
+    expect(metric.holdoutCount).toBeGreaterThan(0);
+    expect(metric.score).toBeGreaterThanOrEqual(0);
+    expect(metric.score).toBeLessThanOrEqual(1);
+  });
+
+  it('reports a positive generalization score when rules are induced', () => {
+    const metric = measureGeneralization([
+      { ref: 'a', elementKey: 'toilet', parameter: 'clearance-front', value: 650 },
+      { ref: 'b', elementKey: 'sink', parameter: 'clearance-front', value: 550 },
+      { ref: 'c', elementKey: 'urinal', parameter: 'clearance-front', value: 600 },
+    ]);
+
+    expect(metric.ruleCount).toBe(3);
+    expect(metric.score).toBeGreaterThan(0);
+  });
+
+  it('reports preference gain after A/B learning moves weights', () => {
+    let state = initialPreferenceState();
+    state = recordPreference(state, candidateWith({ halo: 0, drain: 2000, score: 0.8 }), candidateWith({ halo: 500000, drain: 1900, score: 0.7 }));
+
+    expect(measurePreferenceGain(state)).toBeGreaterThan(0);
   });
 });
 

@@ -6,6 +6,7 @@ import { generateLayoutPool } from "./engine/generator";
 import { routeServices } from "./engine/routing";
 import { checkFeasibility } from "./engine/feasibility";
 import { initialPreferenceState, rankByPreference, recordPreference } from "./engine/preference";
+import { measureGeneralization, measureInductionHoldout, measurePreferenceGain } from "./engine/metrics";
 import { applyInducedRules, induceRules, parseReferenceJson } from "./rules/induction";
 import { clamp, uid } from "./shared/math";
 
@@ -71,15 +72,18 @@ const SAMPLE_REFS = JSON.stringify([
 function O9({library,setLibrary}){
   const [raw,setRaw]=useState(SAMPLE_REFS);
   const [rules,setRules]=useState([]);
+  const [metrics,setMetrics]=useState(null);
   const [err,setErr]=useState("");
   const run=()=>{
     try{
       const refs=parseReferenceJson(raw);
       setRules(induceRules(refs));
+      setMetrics({induction:measureInductionHoldout(refs),generalization:measureGeneralization(refs)});
       setErr("");
     }catch(e){
       setErr(e.message||String(e));
       setRules([]);
+      setMetrics(null);
     }
   };
   const apply=()=>setLibrary(L=>applyInducedRules(L,rules));
@@ -95,7 +99,18 @@ function O9({library,setLibrary}){
       <div className="legend mono"><span><i style={{background:"#e2553f"}}/>core</span><span><i style={{background:"#d9a23b"}}/>halo</span><span><i style={{background:"#5bbd8b"}}/>sat</span><span><i style={{background:"#16b3b3"}}/>conf</span></div>
       <div className="ruleStage">
         {rules.length===0?<div className="noRes">Vnesi strukturirane reference in izluÅ¡Äi Envelope pravila. Zamenjava referenc spremeni generacijo brez spremembe kode.</div>:
-          rules.map(r=><div key={r.id} className="ruleCard">
+          <>
+          {metrics&&<div className="ruleCard metricCard">
+            <div className="rHead"><b>Merilne osi</b><span>MVP</span></div>
+            <div className="envGrid">
+              <span>indukcija <b>{Math.round(metrics.induction.score*100)}</b></span>
+              <span>holdout <b>{metrics.induction.holdoutCount}</b></span>
+              <span>posploÅ¡itev <b>{Math.round(metrics.generalization.score*100)}</b></span>
+              <span>avg conf <b>{metrics.generalization.averageConfidence.toFixed(2)}</b></span>
+            </div>
+            <div className="ruleMeta">MAE {Math.round(metrics.induction.meanAbsoluteError)} mm Â· train {metrics.induction.trainCount}</div>
+          </div>}
+          {rules.map(r=><div key={r.id} className="ruleCard">
             <div className="rHead"><b>{library[r.elementKey]?.name||r.elementKey}</b><span>{r.parameter} Â· {r.envelope.scope}</span></div>
             <div className="envGrid">
               <span>core <b>{r.envelope.core}</b></span><span>halo <b>{r.envelope.halo}</b></span><span>sat <b>{r.envelope.sat}</b></span><span>conf <b>{r.envelope.conf.toFixed(2)}</b></span>
@@ -103,6 +118,7 @@ function O9({library,setLibrary}){
             <div className="ruleMeta">n={r.count} Â· mean {Math.round(r.mean)} Â· variance {Math.round(r.variance)}</div>
             <div className="refs">{r.references.join(" Â· ")}</div>
           </div>)}
+          </>}
       </div>
     </main>
     <aside className="col">
@@ -300,6 +316,7 @@ function O2({library}){
               <span>halo <b className="mono">{Math.round(pref.weights.halo*100)}</b></span>
               <span>odtok <b className="mono">{Math.round(pref.weights.drain*100)}</b></span>
             </div>
+            <div className="prefBars"><span>donos <b className="mono">{Math.round(measurePreferenceGain(pref)*100)}</b></span><span>stabilnost <b className="mono">{pref.stableStreak}</b></span></div>
             <div className={pref.converged?"conv on":"conv"}>{pref.converged?`konvergenca po ${pref.comparisons} primerjavah`:`${pref.comparisons} primerjav Â· signal ${pref.dominantSignal}`}</div>
           </div> : <div className="soft2 none">Za A/B sta potrebni vsaj dve veljavni reÅ¡itvi.</div>}
         </> : <div className="noRes2">Ni veljavne reÅ¡itve za te zahteve.</div>}
@@ -451,6 +468,7 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .refBox{width:100%;min-height:420px;resize:vertical;background:var(--bg);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:10.5px;line-height:1.45;padding:10px}
 .ruleStage{flex:1;margin:0 16px 16px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;align-content:start}
 .ruleCard{background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:12px}.rHead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:10px}.rHead b{font-size:13px}.rHead span{font-size:10px;color:var(--mut)}
+.metricCard{border-color:#1f4444;background:#13282a}
 .envGrid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.envGrid span{background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:7px;font-size:10.5px;color:var(--mut)}.envGrid b{float:right;color:var(--cy)}
 .ruleMeta,.refs{font-size:10.5px;color:var(--mut);line-height:1.45;margin-top:9px}.refs{color:#7fb8e6}
 .libRule{background:var(--p2);border:1px solid var(--bd);border-radius:7px;padding:9px;margin-bottom:7px;display:flex;flex-direction:column;gap:4px}.libRule b{font-size:12px}.libRule span{color:var(--cy);font-size:11px}.libRule i{color:var(--mut);font-size:10px;font-style:normal}
