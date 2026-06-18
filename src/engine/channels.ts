@@ -1,8 +1,10 @@
 import type { LayoutCandidate } from './generator';
 import type { RoomConfig } from '../constraints/brief';
-import type { PlacedFixture } from './evaluator';
+import type { PlacedDoor, PlacedFixture } from './evaluator';
+import type { Box3D } from './volume';
 import { distanceToWall } from './geometry';
-import { humanUsageBox } from './volume';
+import { elementBox, humanUsageBox } from './volume';
+import { buildFreeGrid, corridorWidth } from './freespace';
 
 export type ChannelFamily = 'distance' | 'relational' | 'topology' | 'distribution' | 'alignment';
 export type ChannelScope = 'global' | 'room-type';
@@ -182,12 +184,27 @@ function measureSpaceDistribution(candidate: LayoutCandidate, cfg: RoomConfig): 
   return 1 - Math.min(1, distance / Math.hypot(cfg.W / 2, cfg.D / 2));
 }
 
+// Rang 2 — MIMOHOD MED UPORABO (mehko): ko so uporabniki na svojih mestih (človeški
+// kvadri), ali ostane mimohodni koridor za še enega človeka. Meri najožjo širino
+// poti od vrat do nasprotnega kota ob postavljenih človeških kvadrih. ~600 mm bočno
+// = en človeški kvader; nikoli ne zavrne, le da prednost rešitvi z več zraka.
 function measurePassingWhileUsed(candidate: LayoutCandidate, cfg: RoomConfig): number {
-  const humanBoxes = fixtures(candidate).map(humanUsageBox).filter(Boolean);
-  if (humanBoxes.length === 0) return 1;
-  const occupiedWidth = humanBoxes.reduce((sum, box) => sum + Math.min(box!.w, box!.h), 0);
-  const corridor = Math.min(cfg.W, cfg.D);
-  return 1 - Math.min(1, occupiedWidth / Math.max(corridor, 1));
+  const items = fixtures(candidate);
+  const humans = items.map(humanUsageBox).filter((box): box is Box3D => Boolean(box));
+  if (humans.length === 0) return 1;
+
+  const door = candidate.placed.find((item): item is PlacedDoor => item.kind === 'door');
+  if (!door) {
+    const occupiedWidth = humans.reduce((sum, box) => sum + Math.min(box.w, box.h), 0);
+    return 1 - Math.min(1, occupiedWidth / Math.max(Math.min(cfg.W, cfg.D), 1));
+  }
+
+  const obstacles = [...items.map(elementBox), ...humans];
+  const grid = buildFreeGrid(cfg.W, cfg.D, obstacles);
+  const entry = { x: door.pass.x + door.pass.w / 2, y: door.pass.y + door.pass.h / 2 };
+  const far = { x: cfg.W - entry.x, y: cfg.D - entry.y };
+  const width = corridorWidth(grid, entry, far);
+  return clamp01(width / 1200);
 }
 
 function measureDaylightAccess(candidate: LayoutCandidate, cfg: RoomConfig): number {

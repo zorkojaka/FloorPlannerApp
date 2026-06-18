@@ -14,6 +14,7 @@ import { measureGeneralization, measureInductionHoldout, measurePreferenceGain }
 import { loadJson, saveJson, type JsonStorage } from '../shared/storage';
 import { defaultChannels, effectiveWeight, learnChannelsFromPreference, rankByChannels } from './channels';
 import { collides3D, humanUsageBox, overlapVolume } from './volume';
+import { buildFreeGrid, corridorWidth, reachable } from './freespace';
 
 describe('element orientation', () => {
   it('derives service sides only from wall-routed connections', () => {
@@ -315,6 +316,101 @@ describe('3D human and window model', () => {
 
     expect(ids).toContain('passing-while-used');
     expect(ids).toContain('daylight-access');
+  });
+});
+
+describe('3.0 spatial integration (evaluator)', () => {
+  const cfg = { W: 2400, D: 2400, wetWall: 'S' as const, minAisle: 600 };
+
+  function place(el: ReturnType<typeof baseLib>[string], wall: 'N' | 'S' | 'E' | 'W', pos: number): PlacedFixture {
+    const rects = placeRects(el, wall, pos, cfg.W, cfg.D);
+    return { ...rects, el, wall, name: el.name };
+  }
+  function southDoor(pos: number): PlacedElement {
+    const lib = baseLib();
+    const rects = doorRects(lib.door, 'S', pos, 0, 'outward', cfg.W, cfg.D);
+    return { ...rects, el: lib.door, name: lib.door.name };
+  }
+
+  it('does not flag a shelf stacked above a fixture (3D collision)', () => {
+    const lib = baseLib();
+    const cabinet = { ...lib.sink, name: 'Pult', w: 600, d: 500, z: 0, h: 850, conns: [], usage: { posture: 'none' as const, userAt: 'front' as const } };
+    const shelf = { ...lib.sink, name: 'Polica', w: 600, d: 500, z: 1500, h: 300, conns: [], usage: { posture: 'none' as const, userAt: 'front' as const } };
+    const placed: PlacedElement[] = [southDoor(800), place(cabinet, 'N', 200), place(shelf, 'N', 200)];
+
+    expect(evalPlace(placed, cfg, true).viol).not.toContain('prekrivanje opreme');
+  });
+
+  it('flags two fixtures overlapping at the same height', () => {
+    const lib = baseLib();
+    const cabinet = { ...lib.sink, name: 'Pult', w: 600, d: 500, z: 0, h: 850, conns: [], usage: { posture: 'none' as const, userAt: 'front' as const } };
+    const shelf = { ...lib.sink, name: 'Polica', w: 600, d: 500, z: 0, h: 300, conns: [], usage: { posture: 'none' as const, userAt: 'front' as const } };
+    const placed: PlacedElement[] = [southDoor(800), place(cabinet, 'N', 200), place(shelf, 'N', 200)];
+
+    expect(evalPlace(placed, cfg, true).viol).toContain('prekrivanje opreme');
+  });
+
+  it('flags a shelf that intrudes into the standing user volume (polica nad pisoarjem)', () => {
+    const lib = baseLib();
+    const shelf = { ...lib.urinal, name: 'Polica', w: 400, d: 800, z: 1500, h: 300, conns: [], usage: { posture: 'none' as const, userAt: 'front' as const } };
+    const placed: PlacedElement[] = [southDoor(800), place(lib.urinal, 'N', 800), place(shelf, 'N', 800)];
+
+    expect(evalPlace(placed, cfg, true).viol.some((v) => v.startsWith('element v človeškem prostoru'))).toBe(true);
+  });
+
+  it('allows a ceiling installation above the human head (zračnik nad 1900)', () => {
+    const lib = baseLib();
+    const vent = { ...lib.urinal, name: 'Zračnik', w: 400, d: 800, z: 2000, h: 300, conns: [], usage: { posture: 'none' as const, userAt: 'front' as const } };
+    const placed: PlacedElement[] = [southDoor(800), place(lib.urinal, 'N', 800), place(vent, 'N', 800)];
+
+    expect(evalPlace(placed, cfg, true).viol.some((v) => v.startsWith('element v človeškem prostoru'))).toBe(false);
+  });
+
+  it('flags a tall element that occludes a window, but allows a low one under the parapet', () => {
+    const lib = baseLib();
+    const tall = { ...lib.sink, name: 'Visoka omara', w: 600, d: 500, z: 0, h: 2000, conns: [], usage: { posture: 'none' as const, userAt: 'front' as const } };
+    const low = { ...lib.sink, name: 'Nizka omarica', w: 600, d: 500, z: 0, h: 800, conns: [], usage: { posture: 'none' as const, userAt: 'front' as const } };
+    const window = place(lib.window, 'S', 700);
+
+    const tallViol = evalPlace([southDoor(1600), window, place(tall, 'S', 700)], cfg, true).viol;
+    const lowViol = evalPlace([southDoor(1600), window, place(low, 'S', 700)], cfg, true).viol;
+
+    expect(tallViol.some((v) => v.startsWith('element zastira okno'))).toBe(true);
+    expect(lowViol.some((v) => v.startsWith('element zastira okno'))).toBe(false);
+  });
+});
+
+describe('3.0 walkability (rang 1 prehodnost)', () => {
+  it('finds a path through open space and through a gap in a wall', () => {
+    const open = buildFreeGrid(3000, 3000, []);
+    expect(reachable(open, { x: 200, y: 200 }, { x: 2800, y: 2800 })).toBe(true);
+
+    const gapped = buildFreeGrid(3000, 3000, [
+      { x: 0, y: 1400, w: 1000, h: 200, z: 0, h3: 2000 },
+      { x: 1600, y: 1400, w: 1400, h: 200, z: 0, h3: 2000 },
+    ]);
+    expect(reachable(gapped, { x: 1500, y: 300 }, { x: 1500, y: 2700 })).toBe(true);
+  });
+
+  it('reports no path when a full-width wall splits the room', () => {
+    const split = buildFreeGrid(3000, 3000, [{ x: 0, y: 1400, w: 3000, h: 200, z: 0, h3: 2000 }]);
+    expect(reachable(split, { x: 1500, y: 300 }, { x: 1500, y: 2700 })).toBe(false);
+  });
+
+  it('ignores ceiling installations via the height filter (vent above 1900)', () => {
+    const vent = buildFreeGrid(3000, 3000, [{ x: 0, y: 1400, w: 3000, h: 200, z: 2000, h3: 300 }]);
+    expect(reachable(vent, { x: 1500, y: 300 }, { x: 1500, y: 2700 })).toBe(true);
+  });
+
+  it('measures a wider corridor in open space than through a narrow gap', () => {
+    const open = buildFreeGrid(3000, 3000, []);
+    const narrow = buildFreeGrid(3000, 3000, [
+      { x: 0, y: 1400, w: 1300, h: 200, z: 0, h3: 2000 },
+      { x: 1700, y: 1400, w: 1300, h: 200, z: 0, h3: 2000 },
+    ]);
+    const from = { x: 1500, y: 300 };
+    const to = { x: 1500, y: 2700 };
+    expect(corridorWidth(open, from, to)).toBeGreaterThan(corridorWidth(narrow, from, to));
   });
 });
 
