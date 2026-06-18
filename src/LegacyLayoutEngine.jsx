@@ -5,6 +5,7 @@ import { connectionPoint as connXY, nearestEdge, wallEdge } from "./engine/geome
 import { generateLayoutPool } from "./engine/generator";
 import { routeServices } from "./engine/routing";
 import { checkFeasibility } from "./engine/feasibility";
+import { initialPreferenceState, rankByPreference, recordPreference } from "./engine/preference";
 import { clamp, uid } from "./shared/math";
 
 /* =========================================================================
@@ -140,6 +141,7 @@ function O2({library}){
   const [zones,setZones]=useState([]);
   const setZone=(id,patch)=>setZones(Z=>Z.map(z=>z.id===id?{...z,...patch}:z));
   const [pool,setPool]=useState([]); const [idx,setIdx]=useState(0); const [seed,setSeed]=useState(0);
+  const [pref,setPref]=useState(initialPreferenceState());
   const cfg=useMemo(()=>({W,D,wetWall:wet,minAisle:800}),[W,D,wet]);
   const feasibility=useMemo(()=>checkFeasibility(library,prog,cfg,zones),[library,prog,cfg,zones]);
 
@@ -152,7 +154,14 @@ function O2({library}){
   const cornerEls=prog.filter(p=>{const e=library[p.key];return e&&!isDoor(e)&&serviceSides(e).length>1;});
   const hasDoor=prog.some(p=>isDoor(library[p.key]));
   const best=pool[idx];
+  const optionA=pool[0], optionB=pool[1];
   const routing=useMemo(()=>best?routeServices(best.placed,cfg,{allowFloorRoutes}):null,[best,cfg,allowFloorRoutes]);
+  const choosePreference=(selected,rejected)=>setPref(prev=>{
+    const next=recordPreference(prev,selected,rejected);
+    setPool(P=>rankByPreference(P,next.weights));
+    setIdx(0);
+    return next;
+  });
   const setInst=(id,patch)=>setProg(P=>P.map(p=>p.id===id?{...p,...patch}:p));
   return (
    <div className="o2">
@@ -224,6 +233,18 @@ function O2({library}){
             <span>{r.fixtureName} Â· {CONN[r.connection.type].short} Â· {r.via==="floor"?"tla":"zid"}</span>
             <b className="mono">{(r.length/1000).toFixed(2)} m</b>
           </div>)}</div>
+          <div className="eyebrow mt">A/B preference</div>
+          {optionA&&optionB ? <div className="abBox">
+            <div className="abBtns">
+              <button onClick={()=>choosePreference(optionA,optionB)}>A <span className="mono">{(optionA.ev.score*100|0)}</span></button>
+              <button onClick={()=>choosePreference(optionB,optionA)}>B <span className="mono">{(optionB.ev.score*100|0)}</span></button>
+            </div>
+            <div className="prefBars">
+              <span>halo <b className="mono">{Math.round(pref.weights.halo*100)}</b></span>
+              <span>odtok <b className="mono">{Math.round(pref.weights.drain*100)}</b></span>
+            </div>
+            <div className={pref.converged?"conv on":"conv"}>{pref.converged?`konvergenca po ${pref.comparisons} primerjavah`:`${pref.comparisons} primerjav Â· signal ${pref.dominantSignal}`}</div>
+          </div> : <div className="soft2 none">Za A/B sta potrebni vsaj dve veljavni reÅ¡itvi.</div>}
         </> : <div className="noRes2">Ni veljavne reÅ¡itve za te zahteve.</div>}
       </aside>
     </div>
@@ -366,6 +387,10 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .routeItem{display:flex;justify-content:space-between;gap:8px;align-items:center;background:var(--p2);border:1px solid var(--bd);border-radius:7px;padding:8px 9px;font-size:11px;color:var(--tx)}
 .routeItem.wall{border-color:#244662}.routeItem.floor{border-color:#5a4420}.routeItem.blocked{border-color:#7a3028;color:#f08a78}
 .routeItem b{color:var(--cy);font-size:10.5px;white-space:nowrap}
+.abBox{background:var(--p2);border:1px solid var(--bd);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.abBtns{display:grid;grid-template-columns:1fr 1fr;gap:7px}.abBtns button{border:1px solid var(--bd);background:var(--bg);color:var(--tx);border-radius:7px;padding:8px;cursor:pointer;font-size:12px}.abBtns button:hover{border-color:var(--cy);color:var(--cy)}
+.prefBars{display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:10.5px;color:var(--mut)}.prefBars span{background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:6px}.prefBars b{color:var(--cy);float:right}
+.conv{font-size:10.5px;color:var(--mut);border:1px solid var(--bd);border-radius:6px;padding:7px;background:var(--bg)}.conv.on{color:#7fdede;border-color:#1f4444;background:#13282a}
 `;
 
 

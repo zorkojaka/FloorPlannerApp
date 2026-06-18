@@ -7,6 +7,8 @@ import { checkFeasibility } from './feasibility';
 import { doorRects, overlapArea, placeRects } from './geometry';
 import { generateLayoutPool } from './generator';
 import { placedConnectionPoint, routeServices } from './routing';
+import { initialPreferenceState, recordPreference } from './preference';
+import type { LayoutCandidate } from './generator';
 
 describe('element orientation', () => {
   it('derives service sides only from wall-routed connections', () => {
@@ -147,3 +149,34 @@ describe('brief feasibility', () => {
     expect(pool).toEqual([]);
   });
 });
+
+describe('preference learning', () => {
+  it('moves weights toward the repeatedly preferred signal and reports convergence', () => {
+    const selected = candidateWith({ halo: 0, drain: 2200, score: 0.7 });
+    const rejected = candidateWith({ halo: 800000, drain: 1800, score: 0.6 });
+    let state = initialPreferenceState();
+
+    for (let i = 0; i < 5; i += 1) {
+      state = recordPreference(state, selected, rejected);
+    }
+
+    expect(state.weights.halo).toBeGreaterThan(0.5);
+    expect(state.converged).toBe(true);
+    expect(state.comparisons).toBe(5);
+  });
+});
+
+function candidateWith(ev: { halo: number; drain: number; score: number }): LayoutCandidate {
+  return {
+    placed: [],
+    ev: {
+      valid: true,
+      viol: [],
+      halo: ev.halo,
+      overlaps: [],
+      aisle: 1000,
+      drain: ev.drain,
+      score: ev.score,
+    },
+  };
+}
