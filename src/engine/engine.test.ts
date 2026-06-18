@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { baseLib } from '../elements/library';
 import { orientation, serviceSides } from '../elements/model';
-import type { PlacedElement } from './evaluator';
+import type { PlacedElement, PlacedFixture } from './evaluator';
 import { evalPlace } from './evaluator';
 import { doorRects, overlapArea, placeRects } from './geometry';
 import { generateLayoutPool } from './generator';
+import { placedConnectionPoint, routeServices } from './routing';
 
 describe('element orientation', () => {
   it('derives service sides only from wall-routed connections', () => {
@@ -67,5 +68,40 @@ describe('layout evaluation', () => {
 
     expect(pool.length).toBeGreaterThan(0);
     expect(pool.every((candidate) => candidate.ev.valid)).toBe(true);
+  });
+});
+
+describe('service routing', () => {
+  it('routes from the actual placed connection point', () => {
+    const library = baseLib();
+    const toilet = placeRects(library.toilet, 'S', 200, 1900, 2200);
+    const placedToilet: PlacedFixture = { ...toilet, el: library.toilet, wall: 'S', name: library.toilet.name };
+    const waterIn = library.toilet.conns.find((connection) => connection.type === 'water-in')!;
+
+    const point = placedConnectionPoint(placedToilet, waterIn);
+
+    expect(point).toEqual({ x: 300, y: 2200 });
+  });
+
+  it('changes route length when the wet wall changes', () => {
+    const library = baseLib();
+    const toilet = placeRects(library.toilet, 'S', 200, 1900, 2200);
+    const placed: PlacedElement[] = [{ ...toilet, el: library.toilet, wall: 'S', name: library.toilet.name }];
+
+    const south = routeServices(placed, { W: 1900, D: 2200, wetWall: 'S', minAisle: 800 });
+    const north = routeServices(placed, { W: 1900, D: 2200, wetWall: 'N', minAisle: 800 });
+
+    expect(south.totalLength).toBeLessThan(north.totalLength);
+  });
+
+  it('marks floor routes as blocked when slab policy disallows them', () => {
+    const library = baseLib();
+    const toilet = placeRects(library.toilet, 'S', 200, 1900, 2200);
+    const placed: PlacedElement[] = [{ ...toilet, el: library.toilet, wall: 'S', name: library.toilet.name }];
+
+    const result = routeServices(placed, { W: 1900, D: 2200, wetWall: 'N', minAisle: 800 }, { allowFloorRoutes: false });
+
+    expect(result.blockedCount).toBe(1);
+    expect(result.routes.find((route) => route.connection.routesTo === 'floor')?.blocked).toBe(true);
   });
 });

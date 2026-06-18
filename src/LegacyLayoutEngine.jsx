@@ -3,6 +3,7 @@ import { baseLib } from "./elements/library";
 import { CONNECTION_META as CONN, SIDE_LABELS as SIDES, isDoor, orientation, serviceSides } from "./elements/model";
 import { connectionPoint as connXY, nearestEdge, wallEdge } from "./engine/geometry";
 import { generateLayoutPool } from "./engine/generator";
+import { routeServices } from "./engine/routing";
 import { clamp, uid } from "./shared/math";
 
 /* =========================================================================
@@ -18,7 +19,7 @@ export default function App(){
   const steps=[
     {id:"O1",title:"Model elementa",sub:"priklopi doloÄajo orientacijo Â· clearance kot spekter",status:"deluje"},
     {id:"O2",title:"Postavitev v sobo",sub:"trda jedra se ne prekrivajo Â· halo se sme (s kaznijo)",status:"deluje"},
-    {id:"O5",title:"Instalacije / routing",sub:"trase od priklopov do mokrega zidu Â· stene/tla",status:"prihaja"},
+    {id:"O5",title:"Instalacije / routing",sub:"trase od priklopov do mokrega zidu Â· stene/tla",status:"deluje"},
     {id:"O9",title:"Indukcija iz IFC",sub:"reference â†’ pravila (zamenja rocno vpisana)",status:"prihaja"},
   ];
   return (
@@ -49,7 +50,7 @@ export default function App(){
 
 function Soon({id}){
   const txt=id==="O5"
-    ? "Routing instalacij: realne trase od PRIKLOPNIH TOÄŒK (iz O1) do mokrega zidu/jaÅ¡ka, po politiki stene ali tla. Tu dolÅ¾ino odtoka raÄunamo od dejanskega priklopa, ne od centra opreme."
+    ? "Routing instalacij je aktiven v O2 pogledu: trase teÄejo od dejanskih priklopnih toÄk do mokrega zidu, z dolÅ¾inami, politiko talnih tras in oznaÄenimi kriÅ¾anji."
     : "Indukcija: AI prebere reference/IFC in izluÅ¡Äi pravila v ENVELOPE obliki (jedro/halo/nasiÄenje/zaupanje), ki zamenjajo roÄno vpisane vrednosti iz O1. Steklena Å¡katla pokaÅ¾e sklepanje.";
   return <div className="soon">{txt}</div>;
 }
@@ -134,6 +135,7 @@ function O2({library}){
   const [W,setW]=useState(1900),[D,setD]=useState(2200),[wet,setWet]=useState("S");
   const [prog,setProg]=useState([{id:uid(),key:"door",w:800,dir:"auto",wall:"auto",hinge:"auto"},{id:uid(),key:"toilet"},{id:uid(),key:"sink"}]);
   const [soft,setSoft]=useState(true);
+  const [allowFloorRoutes,setAllowFloorRoutes]=useState(true);
   const [zones,setZones]=useState([]);
   const setZone=(id,patch)=>setZones(Z=>Z.map(z=>z.id===id?{...z,...patch}:z));
   const [pool,setPool]=useState([]); const [idx,setIdx]=useState(0); const [seed,setSeed]=useState(0);
@@ -147,6 +149,7 @@ function O2({library}){
   const cornerEls=prog.filter(p=>{const e=library[p.key];return e&&!isDoor(e)&&serviceSides(e).length>1;});
   const hasDoor=prog.some(p=>isDoor(library[p.key]));
   const best=pool[idx];
+  const routing=useMemo(()=>best?routeServices(best.placed,cfg,{allowFloorRoutes}):null,[best,cfg,allowFloorRoutes]);
   const setInst=(id,patch)=>setProg(P=>P.map(p=>p.id===id?{...p,...patch}:p));
   return (
    <div className="o2">
@@ -188,12 +191,14 @@ function O2({library}){
         <div className="ifaceNote">Vmesnik omejitev: zdaj jih vnaÅ¡aÅ¡ ti (steber, okno, obstojeÄa vrata). Kasneje jih engine za razporeditev sob napolni sam â€” kje so vrata, koliko mÂ².</div>
         <label className="softTgl"><input type="checkbox" checked={soft} onChange={e=>setSoft(e.target.checked)}/> <span>Mehka pravila: halo se sme upogniti</span></label>
         <div className="softNote">{soft?"Halo se sme prekriti (kazen). Lok vrat ostane TRDO pravilo â€” vanj nikoli.":"Strogo: vsako prekrivanje halo = zavrnitev."}</div>
+        <label className="softTgl"><input type="checkbox" checked={allowFloorRoutes} onChange={e=>setAllowFloorRoutes(e.target.checked)}/> <span>O5: talne trase dovoljene</span></label>
+        <div className="softNote">{allowFloorRoutes?"Priklopi, ki vodijo v tla, se lahko trasirajo po ploÅ¡Äi.":"Talne trase ostanejo vidne, vendar so oznaÄene kot blokirane."}</div>
         <button className="regen" onClick={()=>setSeed(s=>s+1)}>â†» Generiraj</button>
       </aside>
 
       <main className="cstage">
-        <div className="legend mono"><span><i style={{background:"#2b3138"}}/>oprema</span><span><i style={{background:"#e2553f"}}/>jedro</span><span><i style={{background:"#d9a23b",opacity:.5}}/>halo</span><span><i style={{background:"#c0392b"}}/>halo prekrit</span><span><i style={{background:"#5aa9e6"}}/>lok vrat</span><span><i style={{background:"#16b3b3"}}/>mokri zid</span></div>
-        <div className="sheet">{best? <O2Plan cand={best} cfg={cfg} zones={zones}/> : <div className="noRes">{!hasDoor?"Dodaj vrata â€” soba brez vrat nima veljavne reÅ¡itve.":soft?"Ni veljavne razporeditve ob teh omejitvah. PoveÄaj prostor ali zrahljaj zahteve.":"V strogem naÄinu ni reÅ¡itve â€” vklopi mehka pravila."}</div>}</div>
+        <div className="legend mono"><span><i style={{background:"#2b3138"}}/>oprema</span><span><i style={{background:"#e2553f"}}/>jedro</span><span><i style={{background:"#d9a23b",opacity:.5}}/>halo</span><span><i style={{background:"#c0392b"}}/>halo prekrit</span><span><i style={{background:"#5aa9e6"}}/>lok vrat</span><span><i style={{background:"#16b3b3"}}/>mokri zid</span><span><i style={{background:"#3f86c9"}}/>O5 zid</span><span><i style={{background:"#d9a23b"}}/>O5 tla</span></div>
+        <div className="sheet">{best? <O2Plan cand={best} cfg={cfg} zones={zones} routing={routing}/> : <div className="noRes">{!hasDoor?"Dodaj vrata â€” soba brez vrat nima veljavne reÅ¡itve.":soft?"Ni veljavne razporeditve ob teh omejitvah. PoveÄaj prostor ali zrahljaj zahteve.":"V strogem naÄinu ni reÅ¡itve â€” vklopi mehka pravila."}</div>}</div>
         <div className="poolBar">{pool.length>0 && <><span className="mono">{pool.length} veljavnih</span>{pool.slice(0,8).map((c,i)=><button key={i} className={"thumb "+(idx===i?"on":"")} onClick={()=>setIdx(i)}><span className="mono">{(c.ev.score*100|0)}</span></button>)}</>}</div>
       </main>
 
@@ -208,14 +213,20 @@ function O2({library}){
             <div key={i} className="soft2"><span className="sw"/>{o.a} â†” {o.b}<br/><span className="mono">{(o.area/1e6).toFixed(2)} mÂ² â†’ dovoljeno, kaznovano</span></div>
           )) : <div className="soft2 none">brez prekrivanj halo â€” Äista razporeditev</div>}
           <div className="eyebrow mt">Instalacije</div>
-          <div className="drain"><span className="mono">{(best.ev.drain/1000).toFixed(2)} m</span> skupni odtok<br/><i>O5 bo raÄunal od priklopne toÄke</i></div>
+          <div className="drain"><span className="mono">{((routing?.totalLength||0)/1000).toFixed(2)} m</span> skupne trase<br/><i>O5 raÄuna od dejanske priklopne toÄke</i></div>
+          {routing?.blockedCount>0 && <div className="warnNote">{routing.blockedCount} talnih tras je blokiranih po politiki ploÅ¡Äe.</div>}
+          {routing?.floorCrossingCount>0 && <div className="warnNote">{routing.floorCrossingCount} talnih tras ima kriÅ¾anje.</div>}
+          <div className="routeList">{routing?.routes.map(r=><div key={r.id} className={"routeItem "+r.via+(r.blocked?" blocked":"")}>
+            <span>{r.fixtureName} Â· {CONN[r.connection.type].short} Â· {r.via==="floor"?"tla":"zid"}</span>
+            <b className="mono">{(r.length/1000).toFixed(2)} m</b>
+          </div>)}</div>
         </> : <div className="noRes2">Ni veljavne reÅ¡itve za te zahteve.</div>}
       </aside>
     </div>
    </div>);
 }
 
-function O2Plan({cand,cfg,zones}){ const {W,D,wetWall}=cfg; const PAD=900; const we=wallEdge(wetWall,W,D);
+function O2Plan({cand,cfg,zones,routing}){ const {W,D,wetWall}=cfg; const PAD=900; const we=wallEdge(wetWall,W,D);
   return <svg viewBox={`${-PAD} ${-PAD} ${W+PAD*2} ${D+PAD*2}`} style={{width:"100%",height:"100%"}}>
     <defs><pattern id="hh" width="80" height="80" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="80" stroke="#d9a23b" strokeWidth="12" opacity=".5"/></pattern>
     <pattern id="nogo" width="70" height="70" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="70" stroke="#e2553f" strokeWidth="16" opacity=".55"/></pattern></defs>
@@ -227,6 +238,11 @@ function O2Plan({cand,cfg,zones}){ const {W,D,wetWall}=cfg; const PAD=900; const
       <text x={-360} y={D/2} dy="52">Z</text>
     </g>
     <line {...we} stroke="#16b3b3" strokeWidth="130"/>
+    {(routing?.routes||[]).map(r=><g key={r.id}>
+      <line x1={r.from.x} y1={r.from.y} x2={r.to.x} y2={r.to.y} stroke={r.blocked?"#e2553f":r.via==="floor"?"#d9a23b":"#3f86c9"} strokeWidth="22" strokeDasharray={r.via==="floor"?"60 42":"none"} opacity=".88"/>
+      {r.crossesFloorRoute&&<circle cx={(r.from.x+r.to.x)/2} cy={(r.from.y+r.to.y)/2} r="54" fill="#d9a23b" stroke="#2b3138" strokeWidth="12"/>}
+      <circle cx={r.from.x} cy={r.from.y} r="42" fill={CONN[r.connection.type].color} stroke="#0e1116" strokeWidth="9"/>
+    </g>)}
     {(zones||[]).map((z,i)=><g key={"z"+i}><rect x={z.x} y={z.y} width={z.w} height={z.h} fill="url(#nogo)" stroke="#e2553f" strokeWidth="16" strokeDasharray="70 50"/>
       <text x={z.x+z.w/2} y={z.y+z.h/2} fill="#b03a2e" fontSize="95" fontFamily="ui-monospace,Menlo,monospace" textAnchor="middle" dy="34">ne</text></g>)}
     {cand.placed.filter(p=>p.kind!=="door").map((p,i)=><rect key={"s"+i} x={p.soft.x} y={p.soft.y} width={p.soft.w} height={p.soft.h} fill="url(#hh)" stroke="#d9a23b" strokeWidth="14" strokeDasharray="50 50" opacity=".8"/>)}
@@ -342,6 +358,10 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .soft2 .sw{position:absolute;left:9px;top:11px;width:9px;height:9px;border-radius:2px;background:#c0392b}.soft2.none{padding-left:11px;color:var(--mut)}
 .soft2 .mono{color:var(--mut)}
 .drain{font-size:11.5px;line-height:1.5;color:var(--tx)}.drain .mono{color:var(--cy);font-size:14px}.drain i{color:var(--mut);font-size:10.5px}
+.routeList{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.routeItem{display:flex;justify-content:space-between;gap:8px;align-items:center;background:var(--p2);border:1px solid var(--bd);border-radius:7px;padding:8px 9px;font-size:11px;color:var(--tx)}
+.routeItem.wall{border-color:#244662}.routeItem.floor{border-color:#5a4420}.routeItem.blocked{border-color:#7a3028;color:#f08a78}
+.routeItem b{color:var(--cy);font-size:10.5px;white-space:nowrap}
 `;
 
 
