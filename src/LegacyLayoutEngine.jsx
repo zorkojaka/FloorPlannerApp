@@ -1,65 +1,40 @@
-import React, { useState, useRef, useMemo, useEffect } from "react";
+﻿import React, { useState, useRef, useMemo, useEffect } from "react";
+import { baseLib } from "./elements/library";
+import { CONNECTION_META as CONN, SIDE_LABELS as SIDES, isDoor, orientation, serviceSides } from "./elements/model";
+import { connectionPoint as connXY, nearestEdge, wallEdge } from "./engine/geometry";
+import { generateLayoutPool } from "./engine/generator";
+import { routeServices } from "./engine/routing";
+import { checkFeasibility } from "./engine/feasibility";
+import { initialPreferenceState, rankByPreference, recordPreference } from "./engine/preference";
+import { measureGeneralization, measureInductionHoldout, measurePreferenceGain } from "./engine/metrics";
+import { defaultChannels, effectiveWeight, learnChannelsFromPreference, rankByChannels, scoreCandidateChannels } from "./engine/channels";
+import { applyInducedRules, induceRules, parseReferenceJson } from "./rules/induction";
+import { clamp, uid } from "./shared/math";
+import { loadJson, saveJson } from "./shared/storage";
 
 /* =========================================================================
-   ZAKLENJEN SISTEM — harmonika orehov
-   O1 model elementa (zlozljiv) · O2 postavitev (trda jedra / mehki halo) ·
-   O5 instalacije (prihaja) · O9 indukcija iz IFC (prihaja)
+   ZAKLENJEN SISTEM - harmonika orehov
+   O1 model elementa (zložljiv) · O2 postavitev (trda jedra / mehki halo) ·
+   O5 instalacije · O9 indukcija pravil
    ========================================================================= */
 
-const CONN = {
-  "water-in":  { name:"Dotok vode",   short:"DV", color:"#3f86c9" },
-  "water-out": { name:"Odvod vode",   short:"OV", color:"#16b3b3" },
-  "electric":  { name:"Elektrika",    short:"EL", color:"#d9a23b" },
-  "vent":      { name:"Prezracevanje",short:"PR", color:"#9a86d0" },
-};
-const SIDES = { back:"zadaj", front:"spredaj", left:"levo", right:"desno" };
-const uid = () => Math.random().toString(36).slice(2,8);
-const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-
-function baseLib(){
-  return {
-    toilet:{category:"toilet",name:"WC skoljka",w:400,d:600,source:"default",
-      conns:[{id:uid(),type:"water-out",side:"back",off:0.5,routesTo:"floor"},{id:uid(),type:"water-in",side:"back",off:0.25,routesTo:"wall"}],
-      clear:{core:650,halo:800,sat:1000,conf:0.92,scope:"room-type"}},
-    sink:{category:"sink",name:"Umivalnik",w:550,d:430,source:"default",
-      conns:[{id:uid(),type:"water-out",side:"back",off:0.55,routesTo:"wall"},{id:uid(),type:"water-in",side:"back",off:0.4,routesTo:"wall"}],
-      clear:{core:550,halo:700,sat:900,conf:0.85,scope:"global"}},
-    urinal:{category:"urinal",name:"Pisoar",w:400,d:350,source:"default",
-      conns:[{id:uid(),type:"water-out",side:"back",off:0.5,routesTo:"wall"},{id:uid(),type:"water-in",side:"back",off:0.5,routesTo:"wall"}],
-      clear:{core:600,halo:750,sat:900,conf:0.8,scope:"room-type"}},
-    door:{category:"door",kind:"door",name:"Vrata",w:800,d:80,source:"default",conns:[],
-      clear:{core:0,halo:0,sat:0,conf:1,scope:"global"}},
-  };
-}
-const isDoor=(el)=>el && el.kind==="door";
-const serviceSides=(el)=>{ const s=new Set(); for(const c of el.conns) if(c.routesTo==="wall") s.add(c.side); return [...s]; };
-function orientation(el){
-  const ss=serviceSides(el);
-  const opp=(a,b)=>(a==="back"&&b==="front")||(a==="front"&&b==="back")||(a==="left"&&b==="right")||(a==="right"&&b==="left");
-  if(ss.length===0) return {txt:"Ni priklopa na zid → prost element (otok).",warn:false,corner:false};
-  if(ss.length===1) return {txt:`Servisna stran ${SIDES[ss[0]]} → ob zidu, 4 orientacije.`,warn:false,corner:false};
-  if(ss.length===2) return opp(ss[0],ss[1])
-    ? {txt:`Priklopa na NASPROTNIH straneh → fizicno nemogoce.`,warn:true,corner:false}
-    : {txt:`Servisni strani ${SIDES[ss[0]]}+${SIDES[ss[1]]} → v VOGAL, 4 vogali.`,warn:false,corner:true};
-  return {txt:`Vec priklopov na zid → najbrz neizvedljivo.`,warn:true,corner:false};
-}
-
-/* ===================== APP — harmonika ===================== */
+/* ===================== APP - harmonika ===================== */
 export default function App(){
-  const [library,setLibrary]=useState(baseLib());
+  const [library,setLibrary]=usePersistentState("floorplanner.library",baseLib);
   const [open,setOpen]=useState("O2");
+  useEffect(()=>setLibrary(L=>normalizeLibraryText(L)),[setLibrary]);
   const steps=[
     {id:"O1",title:"Model elementa",sub:"priklopi določajo orientacijo · clearance kot spekter",status:"deluje"},
     {id:"O2",title:"Postavitev v sobo",sub:"trda jedra se ne prekrivajo · halo se sme (s kaznijo)",status:"deluje"},
-    {id:"O5",title:"Instalacije / routing",sub:"trase od priklopov do mokrega zidu · stene/tla",status:"prihaja"},
-    {id:"O9",title:"Indukcija iz IFC",sub:"reference → pravila (zamenja rocno vpisana)",status:"prihaja"},
+    {id:"O5",title:"Instalacije / routing",sub:"trase od priklopov do mokrega zidu · stene/tla",status:"deluje"},
+    {id:"O9",title:"Indukcija pravil",sub:"strukturirane reference → Envelope pravila",status:"deluje"},
   ];
   return (
     <div className="app">
       <style>{CSS}</style>
       <div className="appHd">
         <span className="brand">◫ Layout Engine</span>
-        <span className="bcrumb mono">oreh 1 · postavitev pohistva v sobo</span>
+        <span className="bcrumb mono">oreh 1 · postavitev opreme v sobo</span>
       </div>
       {steps.map(s=>(
         <section key={s.id} className={"step "+(open===s.id?"open":"")}>
@@ -72,7 +47,8 @@ export default function App(){
           {open===s.id && <div className="stepBody">
             {s.id==="O1" && <O1 library={library} setLibrary={setLibrary}/>}
             {s.id==="O2" && <O2 library={library}/>}
-            {(s.id==="O5"||s.id==="O9") && <Soon id={s.id}/>}
+            {s.id==="O5" && <Soon id={s.id}/>}
+            {s.id==="O9" && <O9 library={library} setLibrary={setLibrary}/>}
           </div>}
         </section>
       ))}
@@ -80,18 +56,119 @@ export default function App(){
   );
 }
 
+function normalizeLibraryText(library){
+  const defaults=baseLib();
+  let changed=false;
+  const next=JSON.parse(JSON.stringify(library));
+  for(const [key,def] of Object.entries(defaults)){
+    if(!next[key]){next[key]=def;changed=true;continue;}
+    for(const prop of ["z","h","usage","parapet"]){
+      if(def[prop]!==undefined&&next[key][prop]===undefined){next[key][prop]=def[prop];changed=true;}
+    }
+  }
+  if(next.toilet?.name==="WC skoljka"){next.toilet.name="WC školjka";changed=true;}
+  return changed?next:library;
+}
+
+function normalizeChannels(channels){
+  const defaults=defaultChannels();
+  let changed=false;
+  const byId=new Map(channels.map(c=>[c.id,c]));
+  const next=defaults.map(def=>{
+    const current=byId.get(def.id);
+    if(!current){changed=true;return def;}
+    const merged={...def,...current};
+    if(current.name!==def.name){merged.name=def.name;changed=true;}
+    return merged;
+  });
+  if(next.length!==channels.length) changed=true;
+  return changed?next:channels;
+}
+
+function usePersistentState(key,initial){
+  const [value,setValue]=useState(()=>loadJson(typeof window==="undefined"?undefined:window.localStorage,key,typeof initial==="function"?initial():initial));
+  useEffect(()=>saveJson(typeof window==="undefined"?undefined:window.localStorage,key,value),[key,value]);
+  return [value,setValue];
+}
+
 function Soon({id}){
   const txt=id==="O5"
-    ? "Routing instalacij: realne trase od PRIKLOPNIH TOČK (iz O1) do mokrega zidu/jaška, po politiki stene ali tla. Tu dolžino odtoka računamo od dejanskega priklopa, ne od centra opreme."
+    ? "Routing instalacij je aktiven v O2 pogledu: trase tečejo od dejanskih priklopnih točk do mokrega zidu, z dolžinami, politiko talnih tras in označenimi križanji."
     : "Indukcija: AI prebere reference/IFC in izlušči pravila v ENVELOPE obliki (jedro/halo/nasičenje/zaupanje), ki zamenjajo ročno vpisane vrednosti iz O1. Steklena škatla pokaže sklepanje.";
   return <div className="soon">{txt}</div>;
 }
 
-/* ===================== O1 ===================== */
-function connXY(c,R){ if(c.side==="back")return{x:R.x+c.off*R.w,y:R.y}; if(c.side==="front")return{x:R.x+c.off*R.w,y:R.y+R.h}; if(c.side==="left")return{x:R.x,y:R.y+c.off*R.h}; return{x:R.x+R.w,y:R.y+c.off*R.h}; }
-function nearestEdge(px,py,R){ const dT=Math.abs(py-R.y),dB=Math.abs(py-(R.y+R.h)),dL=Math.abs(px-R.x),dR=Math.abs(px-(R.x+R.w)); const m=Math.min(dT,dB,dL,dR);
-  if(m===dT)return{side:"back",off:clamp((px-R.x)/R.w,0,1)}; if(m===dB)return{side:"front",off:clamp((px-R.x)/R.w,0,1)}; if(m===dL)return{side:"left",off:clamp((py-R.y)/R.h,0,1)}; return{side:"right",off:clamp((py-R.y)/R.h,0,1)}; }
+const SAMPLE_REFS = JSON.stringify([
+  {ref:"WC-ref-01",scope:"room-type",elementKey:"toilet",parameter:"clearance-front",value:650,note:"validated compact WC"},
+  {ref:"WC-ref-02",scope:"room-type",elementKey:"toilet",parameter:"clearance-front",value:690,note:"renovation reference"},
+  {ref:"WC-ref-03",scope:"room-type",elementKey:"toilet",parameter:"clearance-front",value:720,note:"new build reference"},
+  {ref:"WC-ref-04",scope:"global",elementKey:"sink",parameter:"clearance-front",value:540,note:"small washroom"},
+  {ref:"WC-ref-05",scope:"global",elementKey:"sink",parameter:"clearance-front",value:590,note:"staff WC"},
+  {ref:"WC-ref-06",scope:"global",elementKey:"sink",parameter:"clearance-front",value:620,note:"visitor WC"}
+],null,2);
 
+function O9({library,setLibrary}){
+  const [raw,setRaw]=usePersistentState("floorplanner.o9.references",SAMPLE_REFS);
+  const [rules,setRules]=usePersistentState("floorplanner.o9.rules",[]);
+  const [metrics,setMetrics]=usePersistentState("floorplanner.o9.metrics",null);
+  const [err,setErr]=useState("");
+  const run=()=>{
+    try{
+      const refs=parseReferenceJson(raw);
+      setRules(induceRules(refs));
+      setMetrics({induction:measureInductionHoldout(refs),generalization:measureGeneralization(refs)});
+      setErr("");
+    }catch(e){
+      setErr(e.message||String(e));
+      setRules([]);
+      setMetrics(null);
+    }
+  };
+  const apply=()=>setLibrary(L=>applyInducedRules(L,rules));
+  return <div className="o9 grid3">
+    <aside className="col">
+      <div className="eyebrow">Reference JSON</div>
+      <textarea className="refBox" value={raw} onChange={e=>setRaw(e.target.value)} spellCheck="false"/>
+      <button className="regen" onClick={run}>Izlušči pravila</button>
+      {rules.length>0&&<button className="regen" onClick={apply}>Uporabi v knjižnici</button>}
+      {err&&<div className="warnNote">{err}</div>}
+    </aside>
+    <main className="cstage">
+      <div className="legend mono"><span><i style={{background:"#e2553f"}}/>core</span><span><i style={{background:"#d9a23b"}}/>halo</span><span><i style={{background:"#5bbd8b"}}/>sat</span><span><i style={{background:"#16b3b3"}}/>conf</span></div>
+      <div className="ruleStage">
+        {rules.length===0?<div className="noRes">Vnesi strukturirane reference in izlušči Envelope pravila. Zamenjava referenc spremeni generacijo brez spremembe kode.</div>:
+          <>
+          {metrics&&<div className="ruleCard metricCard">
+            <div className="rHead"><b>Merilne osi</b><span>MVP</span></div>
+            <div className="envGrid">
+              <span>indukcija <b>{Math.round(metrics.induction.score*100)}</b></span>
+              <span>holdout <b>{metrics.induction.holdoutCount}</b></span>
+              <span>posplošitev <b>{Math.round(metrics.generalization.score*100)}</b></span>
+              <span>avg conf <b>{metrics.generalization.averageConfidence.toFixed(2)}</b></span>
+            </div>
+            <div className="ruleMeta">MAE {Math.round(metrics.induction.meanAbsoluteError)} mm · train {metrics.induction.trainCount}</div>
+          </div>}
+          {rules.map(r=><div key={r.id} className="ruleCard">
+            <div className="rHead"><b>{library[r.elementKey]?.name||r.elementKey}</b><span>{r.parameter} · {r.envelope.scope}</span></div>
+            <div className="envGrid">
+              <span>core <b>{r.envelope.core}</b></span><span>halo <b>{r.envelope.halo}</b></span><span>sat <b>{r.envelope.sat}</b></span><span>conf <b>{r.envelope.conf.toFixed(2)}</b></span>
+            </div>
+            <div className="ruleMeta">n={r.count} · mean {Math.round(r.mean)} · variance {Math.round(r.variance)}</div>
+            <div className="refs">{r.references.join(" · ")}</div>
+          </div>)}
+          </>}
+      </div>
+    </main>
+    <aside className="col">
+      <div className="eyebrow">Trenutna knjižnica</div>
+      {Object.entries(library).filter(([k,e])=>!isDoor(e)).map(([k,e])=><div key={k} className="libRule">
+        <b>{e.name}</b><span className="mono">{e.clear.core}/{e.clear.halo}/{e.clear.sat} · {e.clear.conf.toFixed(2)}</span><i>{e.clear.scope} · {e.source}</i>
+      </div>)}
+    </aside>
+  </div>;
+}
+
+/* ===================== O1 ===================== */
 function O1({library,setLibrary}){
   const [sel,setSel]=useState("toilet"); const [selConn,setSelConn]=useState(null); const [drag,setDrag]=useState(null);
   const svgRef=useRef(null); const el=library[sel]; const ori=orientation(el); const ss=serviceSides(el);
@@ -105,7 +182,7 @@ function O1({library,setLibrary}){
    <div className="o1" onPointerMove={onMove} onPointerUp={()=>setDrag(null)} onPointerLeave={()=>setDrag(null)}>
     <div className="grid3">
       <aside className="col">
-        <div className="eyebrow">Knjiznica</div>
+        <div className="eyebrow">Knjižnica</div>
         {Object.entries(library).filter(([k,e])=>!isDoor(e)).map(([k,e])=>(
           <button key={k} className={"litem "+(sel===k?"on":"")} onClick={()=>{setSel(k);setSelConn(null);}}>
             <span>{e.name}</span><span className={"src "+e.source}>{e.source==="user"?"uporabnik":"privzeto"}</span></button>))}
@@ -145,8 +222,13 @@ function O1({library,setLibrary}){
       </main>
       <aside className="col">
         <div className="eyebrow">Dimenzije</div>
-        <Num label="Sirina" v={el.w} set={v=>patch(e=>e.w=v)} min={250} max={2000} step={10}/>
+        <Num label="Širina" v={el.w} set={v=>patch(e=>e.w=v)} min={250} max={2000} step={10}/>
         <Num label="Globina" v={el.d} set={v=>patch(e=>e.d=v)} min={250} max={2500} step={10}/>
+        <Num label="Višina" v={el.h??0} set={v=>patch(e=>e.h=v)} min={0} max={3000} step={50}/>
+        <Num label="Z odmik" v={el.z??0} set={v=>patch(e=>e.z=v)} min={0} max={2500} step={50}/>
+        {el.kind==="window"&&<Num label="Parapet" v={el.parapet??900} set={v=>patch(e=>{e.parapet=v;e.z=v;})} min={0} max={1800} step={50}/>}
+        <div className="eyebrow mt">Uporaba</div>
+        <div className="rt3 wrap">{["none","standing","seated"].map(p=><button key={p} className={(el.usage?.posture||"none")===p?"on":""} onClick={()=>patch(e=>e.usage={posture:p,userAt:"front"})}>{p==="none"?"brez":p==="standing"?"stoje":"sede"}</button>)}</div>
         <div className="eyebrow mt">Priklopi</div>
         {el.conns.map(c=>(
           <div key={c.id} className={"conn "+(selConn===c.id?"on":"")} onClick={()=>setSelConn(c.id)}>
@@ -166,103 +248,49 @@ function O1({library,setLibrary}){
    </div>);
 }
 
-/* ===================== O2 — postavitev ===================== */
-function placeRects(el,wall,pos,W,D){ const along=el.w,depth=el.d,core=el.clear.core,halo=el.clear.halo; let foot,hard,soft;
-  if(wall==="S"){foot={x:pos,y:D-depth,w:along,h:depth};hard={x:pos,y:D-depth-core,w:along,h:core};soft={x:pos,y:D-depth-halo,w:along,h:halo};}
-  else if(wall==="N"){foot={x:pos,y:0,w:along,h:depth};hard={x:pos,y:depth,w:along,h:core};soft={x:pos,y:depth,w:along,h:halo};}
-  else if(wall==="W"){foot={x:0,y:pos,w:depth,h:along};hard={x:depth,y:pos,w:core,h:along};soft={x:depth,y:pos,w:halo,h:along};}
-  else{foot={x:W-depth,y:pos,w:depth,h:along};hard={x:W-depth-core,y:pos,w:core,h:along};soft={x:W-depth-halo,y:pos,w:halo,h:along};}
-  return{foot,hard,soft};}
-
-function doorRects(el,wall,pos,hinge,dir,W,D){ const lw=el.w,TH=80,PASS=520; let foot,sq,pass;
-  if(wall==="S"){foot={x:pos,y:D-TH,w:lw,h:TH};sq={x:pos,y:D-lw,w:lw,h:lw};pass={x:pos,y:D-PASS,w:lw,h:PASS};}
-  else if(wall==="N"){foot={x:pos,y:0,w:lw,h:TH};sq={x:pos,y:0,w:lw,h:lw};pass={x:pos,y:0,w:lw,h:PASS};}
-  else if(wall==="W"){foot={x:0,y:pos,w:TH,h:lw};sq={x:0,y:pos,w:lw,h:lw};pass={x:0,y:pos,w:PASS,h:lw};}
-  else{foot={x:W-TH,y:pos,w:TH,h:lw};sq={x:W-lw,y:pos,w:lw,h:lw};pass={x:W-PASS,y:pos,w:PASS,h:lw};}
-  return{foot,swing:dir==="inward"?sq:null,pass,wall,hinge,dir,kind:"door"};}
-
-const ovArea=(a,b)=>{const x=Math.max(0,Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x));const y=Math.max(0,Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y));return x*y;};
-const ovBox=(a,b)=>{const x1=Math.max(a.x,b.x),y1=Math.max(a.y,b.y),x2=Math.min(a.x+a.w,b.x+b.w),y2=Math.min(a.y+a.h,b.y+b.h);return x2>x1&&y2>y1?{x:x1,y:y1,w:x2-x1,h:y2-y1}:null;};
-const insideR=(r,W,D,e=2)=>r.x>=-e&&r.y>=-e&&r.x+r.w<=W+e&&r.y+r.h<=D+e;
-const distWall=(cx,cy,w,W,D)=>w==="S"?D-cy:w==="N"?cy:w==="E"?W-cx:cx;
-
-function evalPlace(placed,cfg,soft,zones){ const {W,D,wetWall,minAisle}=cfg; const viol=[]; let halo=0; const overlaps=[];
-  const fix=placed.filter(p=>p.kind!=="door"); const doors=placed.filter(p=>p.kind==="door");
-  if(doors.length===0) viol.push("soba nima vrat");
-  for(const p of placed) if(!insideR(p.foot,W,D)) viol.push("element izven sobe");
-  // fixture vs fixture
-  for(let i=0;i<fix.length;i++)for(let j=i+1;j<fix.length;j++){const a=fix[i],b=fix[j];
-    if(ovArea(a.foot,b.foot)>1) viol.push("prekrivanje opreme");
-    if(ovArea(a.hard,b.foot)>1||ovArea(b.hard,a.foot)>1) viol.push("oprema v trdem jedru");
-    if(ovArea(a.hard,b.hard)>1) viol.push(`trdi jedri se prekrivata (${a.name}↔${b.name})`);
-    const so=ovArea(a.soft,b.soft); if(so>1){halo+=so;overlaps.push({a:a.name,b:b.name,area:so,box:ovBox(a.soft,b.soft)});
-      if(!soft) viol.push(`halo prekrivanje v strogem nacinu (${a.name}↔${b.name})`);}
-  }
-  // door (P-01): lok navznoter ne sme zadeti opreme; prehod prost; opening prost
-  for(const d of doors){ for(const f of fix){
-    if(ovArea(f.foot,d.foot)>1) viol.push("oprema v odprtini vrat");
-    if(d.swing && ovArea(f.foot,d.swing)>1) viol.push(`vrata se odpirajo na opremo (${f.name})`);
-    if(ovArea(f.foot,d.pass)>1) viol.push("oprema v prehodu vrat");
-  }}
-  for(let i=0;i<doors.length;i++)for(let j=i+1;j<doors.length;j++) if(ovArea(doors[i].foot,doors[j].foot)>1) viol.push("vrata se prekrivajo");
-  // prepovedane cone (realne omejitve sobe)
-  for(const z of (zones||[])) for(const p of placed){
-    if(ovArea(p.foot,z)>1) viol.push("element v prepovedani coni");
-    if(p.kind==="door"&&p.swing&&ovArea(p.swing,z)>1) viol.push("lok vrat v prepovedani coni");
-  }
-  // prehod (brez vrat v izracunu protrudov)
-  const ext={N:0,S:0,E:0,W:0}; for(const p of fix){const e=(p.wall==="N"||p.wall==="S")?p.foot.h+p.el.clear.core:p.foot.w+p.el.clear.core; if(e>ext[p.wall])ext[p.wall]=e;}
-  const aisle=Math.min(W-ext.E-ext.W,D-ext.N-ext.S); if(aisle<minAisle) viol.push("prehod preozek");
-  let drain=0; for(const p of fix){const c={x:p.foot.x+p.foot.w/2,y:p.foot.y+p.foot.h/2};drain+=distWall(c.x,c.y,wetWall,W,D);}
-  const valid=viol.length===0; const maxDim=Math.max(W,D);
-  const haloN=clamp(halo/(maxDim*maxDim*0.25),0,1); const drainN=clamp(fix.length?drain/(fix.length*maxDim):0,0,1);
-  const score=1-(haloN*0.5+drainN*0.5);
-  return {valid,viol:[...new Set(viol)],halo,overlaps,aisle,drain,score};
-}
-
+/* ===================== O2 - postavitev ===================== */
 function O2({library}){
-  const [W,setW]=useState(1900),[D,setD]=useState(2200),[wet,setWet]=useState("S");
-  const [prog,setProg]=useState([{id:uid(),key:"door",w:800,dir:"auto",wall:"auto",hinge:"auto"},{id:uid(),key:"toilet"},{id:uid(),key:"sink"}]);
-  const [soft,setSoft]=useState(true);
-  const [zones,setZones]=useState([]);
+  const [W,setW]=usePersistentState("floorplanner.project.W",1900),[D,setD]=usePersistentState("floorplanner.project.D",2200),[wet,setWet]=usePersistentState("floorplanner.project.wetWall","S");
+  const [prog,setProg]=usePersistentState("floorplanner.project.program",()=>[{id:uid(),key:"door",w:800,dir:"auto",wall:"auto",hinge:"auto"},{id:uid(),key:"toilet"},{id:uid(),key:"sink"}]);
+  const [soft,setSoft]=usePersistentState("floorplanner.project.soft",true);
+  const [allowFloorRoutes,setAllowFloorRoutes]=usePersistentState("floorplanner.project.allowFloorRoutes",true);
+  const [zones,setZones]=usePersistentState("floorplanner.project.zones",[]);
   const setZone=(id,patch)=>setZones(Z=>Z.map(z=>z.id===id?{...z,...patch}:z));
   const [pool,setPool]=useState([]); const [idx,setIdx]=useState(0); const [seed,setSeed]=useState(0);
+  const [pref,setPref]=usePersistentState("floorplanner.preference",initialPreferenceState);
+  const [channels,setChannels]=usePersistentState("floorplanner.channels",defaultChannels);
+  useEffect(()=>setChannels(C=>normalizeChannels(C)),[setChannels]);
   const cfg=useMemo(()=>({W,D,wetWall:wet,minAisle:800}),[W,D,wet]);
-  const WALLS=["N","S","E","W"];
+  const feasibility=useMemo(()=>checkFeasibility(library,prog,cfg,zones),[library,prog,cfg,zones]);
 
   useEffect(()=>{
-    const insts=prog.map(p=>({...p,el:library[p.key]})).filter(p=>p.el && (isDoor(p.el)||serviceSides(p.el).length<=1));
-    const out=[];
-    for(let s=0;s<1100;s++){ const placed=[]; let ok=true;
-      for(const inst of insts){ const el=inst.el;
-        if(isDoor(el)){ const wall=inst.wall!=="auto"?inst.wall:WALLS[Math.floor(Math.random()*4)];
-          const wlen=(wall==="N"||wall==="S")?W:D; const span=wlen-(inst.w||el.w); if(span<80){ok=false;break;}
-          const pos=inst.fixedPos?clamp((inst.fpos??0.5)*span,0,span):Math.random()*span;
-          const hinge=inst.hinge!=="auto"&&inst.hinge!==undefined?inst.hinge:(Math.random()<0.5?0:1);
-          const dir=inst.dir!=="auto"?inst.dir:(Math.random()<0.5?"inward":"outward");
-          const r=doorRects({...el,w:inst.w||el.w},wall,pos,hinge,dir,W,D);
-          placed.push({...r,el,wall,name:el.name});
-        } else { const wall=WALLS[Math.floor(Math.random()*4)]; const wlen=(wall==="N"||wall==="S")?W:D;
-          if(wlen<el.w){ok=false;break;} const pos=Math.random()*(wlen-el.w);
-          const r=placeRects(el,wall,pos,W,D); placed.push({...r,el,wall,name:el.name}); }
-      }
-      if(!ok) continue; const ev=evalPlace(placed,cfg,soft,zones); if(ev.valid) out.push({placed,ev});
-    }
-    const seen=new Set(); const uniq=[];
-    for(const c of out){const k=c.placed.map(p=>`${p.name[0]}${p.wall}${Math.round(p.foot.x/120)}${Math.round(p.foot.y/120)}${p.dir||""}`).join("|");if(!seen.has(k)){seen.add(k);uniq.push(c);}}
-    uniq.sort((a,b)=>b.ev.score-a.ev.score); setPool(uniq.slice(0,40)); setIdx(0);
-  },[library,prog,W,D,wet,soft,zones,seed,cfg]);
+    if(!feasibility.feasible){setPool([]);setIdx(0);return;}
+    setPool(generateLayoutPool({library, program:prog, cfg, soft, zones}));
+    setIdx(0);
+  },[library,prog,W,D,wet,soft,zones,seed,cfg,feasibility]);
 
   const cornerEls=prog.filter(p=>{const e=library[p.key];return e&&!isDoor(e)&&serviceSides(e).length>1;});
   const hasDoor=prog.some(p=>isDoor(library[p.key]));
   const best=pool[idx];
+  const optionA=pool[0], optionB=pool[1];
+  const bestChannelScores=best?scoreCandidateChannels(best,channels,cfg):null;
+  const routing=useMemo(()=>best?routeServices(best.placed,cfg,{allowFloorRoutes}):null,[best,cfg,allowFloorRoutes]);
+  const choosePreference=(selected,rejected)=>setPref(prev=>{
+    const next=recordPreference(prev,selected,rejected);
+    const learnedChannels=learnChannelsFromPreference(channels,selected,rejected,cfg);
+    setChannels(learnedChannels);
+    setPool(P=>rankByChannels(rankByPreference(P,next.weights),learnedChannels,cfg));
+    setIdx(0);
+    return next;
+  });
+  const setChannel=(id,patch)=>setChannels(C=>C.map(c=>c.id===id?{...c,...patch}:c));
   const setInst=(id,patch)=>setProg(P=>P.map(p=>p.id===id?{...p,...patch}:p));
   return (
    <div className="o2">
     <div className="grid3">
       <aside className="col">
         <div className="eyebrow">Prostor</div>
-        <Num label="Sirina" v={W} set={setW} min={1200} max={5000} step={50}/>
+        <Num label="Širina" v={W} set={setW} min={1200} max={5000} step={50}/>
         <Num label="Globina" v={D} set={setD} min={1400} max={5000} step={50}/>
         <div className="wp"><span>Mokri zid</span><div className="rt wgrid">{["N","E","S","W"].map(w=><button key={w} className={wet===w?"on":""} onClick={()=>setWet(w)}>{({N:"sever",E:"vzhod",S:"jug",W:"zahod"})[w]}</button>)}</div></div>
         <div className="eyebrow mt">Program</div>
@@ -280,7 +308,8 @@ function O2({library}){
             </div>}
           </div>;})}</div>
         {!hasDoor && <div className="warnNote">⚠ Soba rabi vsaj ena vrata. Dodaj jih, sicer ni veljavne rešitve.</div>}
-        {cornerEls.length>0 && <div className="warnNote">Kotni elementi rabijo vogalno postavitev — pride kasneje.</div>}
+        {cornerEls.length>0 && <div className="warnNote">Kotni elementi rabijo vogalno postavitev - pride kasneje.</div>}
+        {!feasibility.feasible && <div className="warnNote"><b>Predhodna izvedljivost</b><br/>{feasibility.reasons.map((r,i)=><span key={i}>{r}<br/></span>)}</div>}
         <div className="eyebrow mt">Realne omejitve sobe</div>
         <button className="add" onClick={()=>setZones(z=>[...z,{id:uid(),x:Math.round(W*0.4),y:Math.round(D*0.35),w:600,h:600}])}>+ prepovedana cona</button>
         {zones.map(z=>(
@@ -294,15 +323,17 @@ function O2({library}){
             </div>
           </div>
         ))}
-        <div className="ifaceNote">Vmesnik omejitev: zdaj jih vnašaš ti (steber, okno, obstoječa vrata). Kasneje jih engine za razporeditev sob napolni sam — kje so vrata, koliko m².</div>
+        <div className="ifaceNote">Vmesnik omejitev: zdaj jih vnašaš ti (steber, okno, obstoječa vrata). Kasneje jih engine za razporeditev sob napolni sam - kje so vrata, koliko m².</div>
         <label className="softTgl"><input type="checkbox" checked={soft} onChange={e=>setSoft(e.target.checked)}/> <span>Mehka pravila: halo se sme upogniti</span></label>
-        <div className="softNote">{soft?"Halo se sme prekriti (kazen). Lok vrat ostane TRDO pravilo — vanj nikoli.":"Strogo: vsako prekrivanje halo = zavrnitev."}</div>
+        <div className="softNote">{soft?"Halo se sme prekriti (kazen). Lok vrat ostane TRDO pravilo - vanj nikoli.":"Strogo: vsako prekrivanje halo = zavrnitev."}</div>
+        <label className="softTgl"><input type="checkbox" checked={allowFloorRoutes} onChange={e=>setAllowFloorRoutes(e.target.checked)}/> <span>O5: talne trase dovoljene</span></label>
+        <div className="softNote">{allowFloorRoutes?"Priklopi, ki vodijo v tla, se lahko trasirajo po plošči.":"Talne trase ostanejo vidne, vendar so označene kot blokirane."}</div>
         <button className="regen" onClick={()=>setSeed(s=>s+1)}>↻ Generiraj</button>
       </aside>
 
       <main className="cstage">
-        <div className="legend mono"><span><i style={{background:"#2b3138"}}/>oprema</span><span><i style={{background:"#e2553f"}}/>jedro</span><span><i style={{background:"#d9a23b",opacity:.5}}/>halo</span><span><i style={{background:"#c0392b"}}/>halo prekrit</span><span><i style={{background:"#5aa9e6"}}/>lok vrat</span><span><i style={{background:"#16b3b3"}}/>mokri zid</span></div>
-        <div className="sheet">{best? <O2Plan cand={best} cfg={cfg} zones={zones}/> : <div className="noRes">{!hasDoor?"Dodaj vrata — soba brez vrat nima veljavne rešitve.":soft?"Ni veljavne razporeditve ob teh omejitvah. Povečaj prostor ali zrahljaj zahteve.":"V strogem načinu ni rešitve — vklopi mehka pravila."}</div>}</div>
+        <div className="legend mono"><span><i style={{background:"#2b3138"}}/>oprema</span><span><i style={{background:"#e2553f"}}/>jedro</span><span><i style={{background:"#d9a23b",opacity:.5}}/>halo</span><span><i style={{background:"#c0392b"}}/>halo prekrit</span><span><i style={{background:"#5aa9e6"}}/>lok vrat</span><span><i style={{background:"#16b3b3"}}/>mokri zid</span><span><i style={{background:"#3f86c9"}}/>O5 zid</span><span><i style={{background:"#d9a23b"}}/>O5 tla</span></div>
+        <div className="sheet">{best? <O2Plan cand={best} cfg={cfg} zones={zones} routing={routing}/> : <div className="noRes">{!feasibility.feasible?<>Brief ni izvedljiv:<br/>{feasibility.reasons.join(" · ")}</>:!hasDoor?"Dodaj vrata - soba brez vrat nima veljavne rešitve.":soft?"Ni veljavne razporeditve ob teh omejitvah. Povečaj prostor ali zrahljaj zahteve.":"V strogem načinu ni rešitve - vklopi mehka pravila."}</div>}</div>
         <div className="poolBar">{pool.length>0 && <><span className="mono">{pool.length} veljavnih</span>{pool.slice(0,8).map((c,i)=><button key={i} className={"thumb "+(idx===i?"on":"")} onClick={()=>setIdx(i)}><span className="mono">{(c.ev.score*100|0)}</span></button>)}</>}</div>
       </main>
 
@@ -315,16 +346,53 @@ function O2({library}){
           <div className="eyebrow mt">Mehke kazni (halo)</div>
           {best.ev.overlaps.length>0 ? best.ev.overlaps.map((o,i)=>(
             <div key={i} className="soft2"><span className="sw"/>{o.a} ↔ {o.b}<br/><span className="mono">{(o.area/1e6).toFixed(2)} m² → dovoljeno, kaznovano</span></div>
-          )) : <div className="soft2 none">brez prekrivanj halo — čista razporeditev</div>}
+          )) : <div className="soft2 none">brez prekrivanj halo - čista razporeditev</div>}
           <div className="eyebrow mt">Instalacije</div>
-          <div className="drain"><span className="mono">{(best.ev.drain/1000).toFixed(2)} m</span> skupni odtok<br/><i>O5 bo računal od priklopne točke</i></div>
+          <div className="drain"><span className="mono">{((routing?.totalLength||0)/1000).toFixed(2)} m</span> skupne trase<br/><i>O5 računa od dejanske priklopne točke</i></div>
+          {routing?.blockedCount>0 && <div className="warnNote">{routing.blockedCount} talnih tras je blokiranih po politiki plošče.</div>}
+          {routing?.floorCrossingCount>0 && <div className="warnNote">{routing.floorCrossingCount} talnih tras ima križanje.</div>}
+          <div className="routeList">{routing?.routes.map(r=><div key={r.id} className={"routeItem "+r.via+(r.blocked?" blocked":"")}>
+            <span>{r.fixtureName} · {CONN[r.connection.type].short} · {r.via==="floor"?"tla":"zid"}</span>
+            <b className="mono">{(r.length/1000).toFixed(2)} m</b>
+          </div>)}</div>
+          <div className="eyebrow mt">A/B preference</div>
+          {optionA&&optionB ? <div className="abBox">
+            <div className="abBtns">
+              <button onClick={()=>choosePreference(optionA,optionB)}>A <span className="mono">{(optionA.ev.score*100|0)}</span></button>
+              <button onClick={()=>choosePreference(optionB,optionA)}>B <span className="mono">{(optionB.ev.score*100|0)}</span></button>
+            </div>
+            <div className="prefBars">
+              <span>halo <b className="mono">{Math.round(pref.weights.halo*100)}</b></span>
+              <span>odtok <b className="mono">{Math.round(pref.weights.drain*100)}</b></span>
+            </div>
+            <div className="prefBars"><span>donos <b className="mono">{Math.round(measurePreferenceGain(pref)*100)}</b></span><span>stabilnost <b className="mono">{pref.stableStreak}</b></span></div>
+            <div className={pref.converged?"conv on":"conv"}>{pref.converged?`konvergenca po ${pref.comparisons} primerjavah`:`${pref.comparisons} primerjav · signal ${pref.dominantSignal}`}</div>
+          </div> : <div className="soft2 none">Za A/B sta potrebni vsaj dve veljavni rešitvi.</div>}
+          <div className="eyebrow mt">Testna miza kanalov</div>
+          <div className="channelBench">
+            {channels.map(ch=>{
+              const score=bestChannelScores?.scores.find(s=>s.channelId===ch.id);
+              return <div key={ch.id} className={"channelCard "+(!ch.enabled?"off":"")}>
+                <div className="chTop"><label><input type="checkbox" checked={ch.enabled} onChange={e=>setChannel(ch.id,{enabled:e.target.checked})}/> {ch.name}</label><span>{ch.family}</span></div>
+                <div className="chScope"><button className={ch.scope==="global"?"on":""} onClick={()=>setChannel(ch.id,{scope:"global"})}>global</button><button className={ch.scope==="room-type"?"on":""} onClick={()=>setChannel(ch.id,{scope:"room-type"})}>room</button></div>
+                <label className="chSlider">prior <input type="range" min="0" max="1" step="0.01" value={ch.prior} onChange={e=>setChannel(ch.id,{prior:+e.target.value})}/><b className="mono">{Math.round(ch.prior*100)}</b></label>
+                <label className="chSlider">zaup. <input type="range" min="0" max="1" step="0.01" value={ch.confidence} onChange={e=>setChannel(ch.id,{confidence:+e.target.value})}/><b className="mono">{Math.round(ch.confidence*100)}</b></label>
+                <div className="chBars">
+                  <span style={{"--w":`${ch.prior*100}%`}}>prior</span>
+                  <span style={{"--w":`${ch.learned*100}%`}}>learned</span>
+                  <span style={{"--w":`${effectiveWeight(ch)*100}%`}}>eff</span>
+                </div>
+                <div className="chScore">score <b className="mono">{score?Math.round(score.value*100):"-"}</b></div>
+              </div>
+            })}
+          </div>
         </> : <div className="noRes2">Ni veljavne rešitve za te zahteve.</div>}
       </aside>
     </div>
    </div>);
 }
 
-function O2Plan({cand,cfg,zones}){ const {W,D,wetWall}=cfg; const PAD=900; const we=wallEdge(wetWall,W,D);
+function O2Plan({cand,cfg,zones,routing}){ const {W,D,wetWall}=cfg; const PAD=900; const we=wallEdge(wetWall,W,D);
   return <svg viewBox={`${-PAD} ${-PAD} ${W+PAD*2} ${D+PAD*2}`} style={{width:"100%",height:"100%"}}>
     <defs><pattern id="hh" width="80" height="80" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="80" stroke="#d9a23b" strokeWidth="12" opacity=".5"/></pattern>
     <pattern id="nogo" width="70" height="70" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="70" stroke="#e2553f" strokeWidth="16" opacity=".55"/></pattern></defs>
@@ -336,6 +404,11 @@ function O2Plan({cand,cfg,zones}){ const {W,D,wetWall}=cfg; const PAD=900; const
       <text x={-360} y={D/2} dy="52">Z</text>
     </g>
     <line {...we} stroke="#16b3b3" strokeWidth="130"/>
+    {(routing?.routes||[]).map(r=><g key={r.id}>
+      <line x1={r.from.x} y1={r.from.y} x2={r.to.x} y2={r.to.y} stroke={r.blocked?"#e2553f":r.via==="floor"?"#d9a23b":"#3f86c9"} strokeWidth="22" strokeDasharray={r.via==="floor"?"60 42":"none"} opacity=".88"/>
+      {r.crossesFloorRoute&&<circle cx={(r.from.x+r.to.x)/2} cy={(r.from.y+r.to.y)/2} r="54" fill="#d9a23b" stroke="#2b3138" strokeWidth="12"/>}
+      <circle cx={r.from.x} cy={r.from.y} r="42" fill={CONN[r.connection.type].color} stroke="#0e1116" strokeWidth="9"/>
+    </g>)}
     {(zones||[]).map((z,i)=><g key={"z"+i}><rect x={z.x} y={z.y} width={z.w} height={z.h} fill="url(#nogo)" stroke="#e2553f" strokeWidth="16" strokeDasharray="70 50"/>
       <text x={z.x+z.w/2} y={z.y+z.h/2} fill="#b03a2e" fontSize="95" fontFamily="ui-monospace,Menlo,monospace" textAnchor="middle" dy="34">ne</text></g>)}
     {cand.placed.filter(p=>p.kind!=="door").map((p,i)=><rect key={"s"+i} x={p.soft.x} y={p.soft.y} width={p.soft.w} height={p.soft.h} fill="url(#hh)" stroke="#d9a23b" strokeWidth="14" strokeDasharray="50 50" opacity=".8"/>)}
@@ -359,7 +432,7 @@ function Door({p,W,D}){
   const Hx=sx+along[0]*lw*hs,     Hy=sy+along[1]*lw*hs;       // tecaj (fiksen)
   const Jx=sx+along[0]*lw*(1-hs), Jy=sy+along[1]*lw*(1-hs);   // zaprti podboj
   const Tx=Hx+norm[0]*lw*sgn,     Ty=Hy+norm[1]*lw*sgn;       // odprto krilo (90°)
-  // sweep iz dejanskega kota: lok od T do J okoli H, krajsa pot (90°)
+  // sweep iz dejanskega kota: lok od T do J okoli H, krajša pot (90°)
   const aT=Math.atan2(Ty-Hy,Tx-Hx), aJ=Math.atan2(Jy-Hy,Jx-Hx);
   let d=aJ-aT; while(d<=-Math.PI)d+=2*Math.PI; while(d>Math.PI)d-=2*Math.PI;
   const sweep=d>0?1:0;
@@ -375,12 +448,11 @@ function Door({p,W,D}){
   </g>;
 }
 
-function wallEdge(w,W,D){ if(w==="S")return{x1:0,y1:D,x2:W,y2:D}; if(w==="N")return{x1:0,y1:0,x2:W,y2:0}; if(w==="W")return{x1:0,y1:0,x2:0,y2:D}; return{x1:W,y1:0,x2:W,y2:D}; }
 
 
 /* ===================== mali gradniki ===================== */
 function ZNum({label,v,set,max}){ return <label className="znum"><span>{label}</span><input type="range" min="0" max={max} step="50" value={v} onChange={e=>set(+e.target.value)}/><b className="mono">{v}</b></label>; }
-function Num({label,v,set,min,max,step,c}){ return <div className="num"><div className="fhd"><span>{label}</span><span className="mono" style={c?{color:c}:{}}>{v}{label.match(/Sirina|Globina|Jedro|Halo/)?" mm":""}</span></div><input type="range" min={min} max={max} step={step} value={v} onChange={e=>set(+e.target.value)} style={c?{accentColor:c}:{}}/></div>; }
+function Num({label,v,set,min,max,step,c}){ return <div className="num"><div className="fhd"><span>{label}</span><span className="mono" style={c?{color:c}:{}}>{v}{label.match(/Širina|Globina|Višina|Z odmik|Parapet|Jedro|Halo/)?" mm":""}</span></div><input type="range" min={min} max={max} step={step} value={v} onChange={e=>set(+e.target.value)} style={c?{accentColor:c}:{}}/></div>; }
 
 const CSS=`
 .app{--bg:#0f1419;--panel:#161c23;--p2:#1b222b;--bd:#252e39;--tx:#d7dee6;--mut:#7c8794;--cy:#16b3b3;
@@ -452,4 +524,31 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .soft2 .sw{position:absolute;left:9px;top:11px;width:9px;height:9px;border-radius:2px;background:#c0392b}.soft2.none{padding-left:11px;color:var(--mut)}
 .soft2 .mono{color:var(--mut)}
 .drain{font-size:11.5px;line-height:1.5;color:var(--tx)}.drain .mono{color:var(--cy);font-size:14px}.drain i{color:var(--mut);font-size:10.5px}
+.routeList{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.routeItem{display:flex;justify-content:space-between;gap:8px;align-items:center;background:var(--p2);border:1px solid var(--bd);border-radius:7px;padding:8px 9px;font-size:11px;color:var(--tx)}
+.routeItem.wall{border-color:#244662}.routeItem.floor{border-color:#5a4420}.routeItem.blocked{border-color:#7a3028;color:#f08a78}
+.routeItem b{color:var(--cy);font-size:10.5px;white-space:nowrap}
+.abBox{background:var(--p2);border:1px solid var(--bd);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.abBtns{display:grid;grid-template-columns:1fr 1fr;gap:7px}.abBtns button{border:1px solid var(--bd);background:var(--bg);color:var(--tx);border-radius:7px;padding:8px;cursor:pointer;font-size:12px}.abBtns button:hover{border-color:var(--cy);color:var(--cy)}
+.prefBars{display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:10.5px;color:var(--mut)}.prefBars span{background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:6px}.prefBars b{color:var(--cy);float:right}
+.conv{font-size:10.5px;color:var(--mut);border:1px solid var(--bd);border-radius:6px;padding:7px;background:var(--bg)}.conv.on{color:#7fdede;border-color:#1f4444;background:#13282a}
+.channelBench{display:flex;flex-direction:column;gap:8px}
+.channelCard{background:var(--p2);border:1px solid var(--bd);border-radius:8px;padding:9px;display:flex;flex-direction:column;gap:7px}.channelCard.off{opacity:.52}
+.chTop{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:11px}.chTop label{display:flex;align-items:center;gap:6px;color:var(--tx)}.chTop span{font-size:9px;color:var(--mut);text-transform:uppercase}
+.chScope{display:grid;grid-template-columns:1fr 1fr;gap:5px}.chScope button{background:var(--bg);border:1px solid var(--bd);color:var(--mut);border-radius:6px;padding:5px;font-size:10px;cursor:pointer}.chScope button.on{border-color:var(--cy);color:var(--cy)}
+.chSlider{display:grid;grid-template-columns:38px 1fr 28px;gap:6px;align-items:center;font-size:10px;color:var(--mut)}.chSlider input{height:3px}.chSlider b{color:var(--cy);text-align:right}
+.chBars{display:grid;gap:4px}.chBars span{position:relative;overflow:hidden;background:var(--bg);border:1px solid var(--bd);border-radius:5px;padding:4px 6px;font-size:9.5px;color:var(--mut)}.chBars span:before{content:"";position:absolute;inset:0 auto 0 0;width:var(--w);background:#16b3b333}.chBars span{z-index:0}.chBars span::after{content:"";position:relative}
+.chScore{font-size:10px;color:var(--mut)}.chScore b{float:right;color:var(--cy)}
+.refBox{width:100%;min-height:420px;resize:vertical;background:var(--bg);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:10.5px;line-height:1.45;padding:10px}
+.ruleStage{flex:1;margin:0 16px 16px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;align-content:start}
+.ruleCard{background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:12px}.rHead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:10px}.rHead b{font-size:13px}.rHead span{font-size:10px;color:var(--mut)}
+.metricCard{border-color:#1f4444;background:#13282a}
+.envGrid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.envGrid span{background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:7px;font-size:10.5px;color:var(--mut)}.envGrid b{float:right;color:var(--cy)}
+.ruleMeta,.refs{font-size:10.5px;color:var(--mut);line-height:1.45;margin-top:9px}.refs{color:#7fb8e6}
+.libRule{background:var(--p2);border:1px solid var(--bd);border-radius:7px;padding:9px;margin-bottom:7px;display:flex;flex-direction:column;gap:4px}.libRule b{font-size:12px}.libRule span{color:var(--cy);font-size:11px}.libRule i{color:var(--mut);font-size:10px;font-style:normal}
 `;
+
+
+
+
+
