@@ -9,6 +9,7 @@ import { generateLayoutPool } from './generator';
 import { placedConnectionPoint, routeServices } from './routing';
 import { initialPreferenceState, recordPreference } from './preference';
 import type { LayoutCandidate } from './generator';
+import { applyInducedRules, induceRules } from '../rules/induction';
 
 describe('element orientation', () => {
   it('derives service sides only from wall-routed connections', () => {
@@ -163,6 +164,49 @@ describe('preference learning', () => {
     expect(state.weights.halo).toBeGreaterThan(0.5);
     expect(state.converged).toBe(true);
     expect(state.comparisons).toBe(5);
+  });
+});
+
+describe('rule induction', () => {
+  it('derives higher confidence from low-variance references', () => {
+    const lowVariance = induceRules([
+      { ref: 'a', elementKey: 'toilet', parameter: 'clearance-front', value: 650 },
+      { ref: 'b', elementKey: 'toilet', parameter: 'clearance-front', value: 660 },
+      { ref: 'c', elementKey: 'toilet', parameter: 'clearance-front', value: 670 },
+    ]);
+    const highVariance = induceRules([
+      { ref: 'a', elementKey: 'toilet', parameter: 'clearance-front', value: 500 },
+      { ref: 'b', elementKey: 'toilet', parameter: 'clearance-front', value: 900 },
+      { ref: 'c', elementKey: 'toilet', parameter: 'clearance-front', value: 1200 },
+    ]);
+
+    expect(lowVariance[0].envelope.conf).toBeGreaterThan(highVariance[0].envelope.conf);
+  });
+
+  it('changes generated envelopes when references change', () => {
+    const compact = induceRules([
+      { ref: 'compact-a', elementKey: 'sink', parameter: 'clearance-front', value: 500 },
+      { ref: 'compact-b', elementKey: 'sink', parameter: 'clearance-front', value: 520 },
+    ]);
+    const generous = induceRules([
+      { ref: 'generous-a', elementKey: 'sink', parameter: 'clearance-front', value: 800 },
+      { ref: 'generous-b', elementKey: 'sink', parameter: 'clearance-front', value: 840 },
+    ]);
+
+    expect(compact[0].envelope.halo).toBeLessThan(generous[0].envelope.halo);
+  });
+
+  it('applies induced clearance rules to the element library', () => {
+    const library = baseLib();
+    const rules = induceRules([
+      { ref: 'r1', elementKey: 'toilet', parameter: 'clearance-front', value: 760 },
+      { ref: 'r2', elementKey: 'toilet', parameter: 'clearance-front', value: 780 },
+    ]);
+
+    const next = applyInducedRules(library, rules);
+
+    expect(next.toilet.clear.halo).not.toBe(library.toilet.clear.halo);
+    expect(next.toilet.source).toBe('ifc');
   });
 });
 

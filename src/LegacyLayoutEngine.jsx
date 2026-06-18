@@ -6,6 +6,7 @@ import { generateLayoutPool } from "./engine/generator";
 import { routeServices } from "./engine/routing";
 import { checkFeasibility } from "./engine/feasibility";
 import { initialPreferenceState, rankByPreference, recordPreference } from "./engine/preference";
+import { applyInducedRules, induceRules, parseReferenceJson } from "./rules/induction";
 import { clamp, uid } from "./shared/math";
 
 /* =========================================================================
@@ -22,7 +23,7 @@ export default function App(){
     {id:"O1",title:"Model elementa",sub:"priklopi doloÄajo orientacijo Â· clearance kot spekter",status:"deluje"},
     {id:"O2",title:"Postavitev v sobo",sub:"trda jedra se ne prekrivajo Â· halo se sme (s kaznijo)",status:"deluje"},
     {id:"O5",title:"Instalacije / routing",sub:"trase od priklopov do mokrega zidu Â· stene/tla",status:"deluje"},
-    {id:"O9",title:"Indukcija iz IFC",sub:"reference â†’ pravila (zamenja rocno vpisana)",status:"prihaja"},
+    {id:"O9",title:"Indukcija pravil",sub:"strukturirane reference â†’ Envelope pravila",status:"deluje"},
   ];
   return (
     <div className="app">
@@ -42,7 +43,8 @@ export default function App(){
           {open===s.id && <div className="stepBody">
             {s.id==="O1" && <O1 library={library} setLibrary={setLibrary}/>}
             {s.id==="O2" && <O2 library={library}/>}
-            {(s.id==="O5"||s.id==="O9") && <Soon id={s.id}/>}
+            {s.id==="O5" && <Soon id={s.id}/>}
+            {s.id==="O9" && <O9 library={library} setLibrary={setLibrary}/>}
           </div>}
         </section>
       ))}
@@ -55,6 +57,61 @@ function Soon({id}){
     ? "Routing instalacij je aktiven v O2 pogledu: trase teÄejo od dejanskih priklopnih toÄk do mokrega zidu, z dolÅ¾inami, politiko talnih tras in oznaÄenimi kriÅ¾anji."
     : "Indukcija: AI prebere reference/IFC in izluÅ¡Äi pravila v ENVELOPE obliki (jedro/halo/nasiÄenje/zaupanje), ki zamenjajo roÄno vpisane vrednosti iz O1. Steklena Å¡katla pokaÅ¾e sklepanje.";
   return <div className="soon">{txt}</div>;
+}
+
+const SAMPLE_REFS = JSON.stringify([
+  {ref:"WC-ref-01",scope:"room-type",elementKey:"toilet",parameter:"clearance-front",value:650,note:"validated compact WC"},
+  {ref:"WC-ref-02",scope:"room-type",elementKey:"toilet",parameter:"clearance-front",value:690,note:"renovation reference"},
+  {ref:"WC-ref-03",scope:"room-type",elementKey:"toilet",parameter:"clearance-front",value:720,note:"new build reference"},
+  {ref:"WC-ref-04",scope:"global",elementKey:"sink",parameter:"clearance-front",value:540,note:"small washroom"},
+  {ref:"WC-ref-05",scope:"global",elementKey:"sink",parameter:"clearance-front",value:590,note:"staff WC"},
+  {ref:"WC-ref-06",scope:"global",elementKey:"sink",parameter:"clearance-front",value:620,note:"visitor WC"}
+],null,2);
+
+function O9({library,setLibrary}){
+  const [raw,setRaw]=useState(SAMPLE_REFS);
+  const [rules,setRules]=useState([]);
+  const [err,setErr]=useState("");
+  const run=()=>{
+    try{
+      const refs=parseReferenceJson(raw);
+      setRules(induceRules(refs));
+      setErr("");
+    }catch(e){
+      setErr(e.message||String(e));
+      setRules([]);
+    }
+  };
+  const apply=()=>setLibrary(L=>applyInducedRules(L,rules));
+  return <div className="o9 grid3">
+    <aside className="col">
+      <div className="eyebrow">Reference JSON</div>
+      <textarea className="refBox" value={raw} onChange={e=>setRaw(e.target.value)} spellCheck="false"/>
+      <button className="regen" onClick={run}>IzluÅ¡Äi pravila</button>
+      {rules.length>0&&<button className="regen" onClick={apply}>Uporabi v knjiÅ¾nici</button>}
+      {err&&<div className="warnNote">{err}</div>}
+    </aside>
+    <main className="cstage">
+      <div className="legend mono"><span><i style={{background:"#e2553f"}}/>core</span><span><i style={{background:"#d9a23b"}}/>halo</span><span><i style={{background:"#5bbd8b"}}/>sat</span><span><i style={{background:"#16b3b3"}}/>conf</span></div>
+      <div className="ruleStage">
+        {rules.length===0?<div className="noRes">Vnesi strukturirane reference in izluÅ¡Äi Envelope pravila. Zamenjava referenc spremeni generacijo brez spremembe kode.</div>:
+          rules.map(r=><div key={r.id} className="ruleCard">
+            <div className="rHead"><b>{library[r.elementKey]?.name||r.elementKey}</b><span>{r.parameter} Â· {r.envelope.scope}</span></div>
+            <div className="envGrid">
+              <span>core <b>{r.envelope.core}</b></span><span>halo <b>{r.envelope.halo}</b></span><span>sat <b>{r.envelope.sat}</b></span><span>conf <b>{r.envelope.conf.toFixed(2)}</b></span>
+            </div>
+            <div className="ruleMeta">n={r.count} Â· mean {Math.round(r.mean)} Â· variance {Math.round(r.variance)}</div>
+            <div className="refs">{r.references.join(" Â· ")}</div>
+          </div>)}
+      </div>
+    </main>
+    <aside className="col">
+      <div className="eyebrow">Trenutna knjiÅ¾nica</div>
+      {Object.entries(library).filter(([k,e])=>!isDoor(e)).map(([k,e])=><div key={k} className="libRule">
+        <b>{e.name}</b><span className="mono">{e.clear.core}/{e.clear.halo}/{e.clear.sat} Â· {e.clear.conf.toFixed(2)}</span><i>{e.clear.scope} Â· {e.source}</i>
+      </div>)}
+    </aside>
+  </div>;
 }
 
 /* ===================== O1 ===================== */
@@ -391,6 +448,12 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .abBtns{display:grid;grid-template-columns:1fr 1fr;gap:7px}.abBtns button{border:1px solid var(--bd);background:var(--bg);color:var(--tx);border-radius:7px;padding:8px;cursor:pointer;font-size:12px}.abBtns button:hover{border-color:var(--cy);color:var(--cy)}
 .prefBars{display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:10.5px;color:var(--mut)}.prefBars span{background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:6px}.prefBars b{color:var(--cy);float:right}
 .conv{font-size:10.5px;color:var(--mut);border:1px solid var(--bd);border-radius:6px;padding:7px;background:var(--bg)}.conv.on{color:#7fdede;border-color:#1f4444;background:#13282a}
+.refBox{width:100%;min-height:420px;resize:vertical;background:var(--bg);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:10.5px;line-height:1.45;padding:10px}
+.ruleStage{flex:1;margin:0 16px 16px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;align-content:start}
+.ruleCard{background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:12px}.rHead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:10px}.rHead b{font-size:13px}.rHead span{font-size:10px;color:var(--mut)}
+.envGrid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.envGrid span{background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:7px;font-size:10.5px;color:var(--mut)}.envGrid b{float:right;color:var(--cy)}
+.ruleMeta,.refs{font-size:10.5px;color:var(--mut);line-height:1.45;margin-top:9px}.refs{color:#7fb8e6}
+.libRule{background:var(--p2);border:1px solid var(--bd);border-radius:7px;padding:9px;margin-bottom:7px;display:flex;flex-direction:column;gap:4px}.libRule b{font-size:12px}.libRule span{color:var(--cy);font-size:11px}.libRule i{color:var(--mut);font-size:10px;font-style:normal}
 `;
 
 
