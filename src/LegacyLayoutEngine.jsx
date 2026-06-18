@@ -4,6 +4,7 @@ import { CONNECTION_META as CONN, SIDE_LABELS as SIDES, isDoor, orientation, ser
 import { connectionPoint as connXY, nearestEdge, wallEdge } from "./engine/geometry";
 import { generateLayoutPool } from "./engine/generator";
 import { routeServices } from "./engine/routing";
+import { checkFeasibility } from "./engine/feasibility";
 import { clamp, uid } from "./shared/math";
 
 /* =========================================================================
@@ -140,11 +141,13 @@ function O2({library}){
   const setZone=(id,patch)=>setZones(Z=>Z.map(z=>z.id===id?{...z,...patch}:z));
   const [pool,setPool]=useState([]); const [idx,setIdx]=useState(0); const [seed,setSeed]=useState(0);
   const cfg=useMemo(()=>({W,D,wetWall:wet,minAisle:800}),[W,D,wet]);
+  const feasibility=useMemo(()=>checkFeasibility(library,prog,cfg,zones),[library,prog,cfg,zones]);
 
   useEffect(()=>{
+    if(!feasibility.feasible){setPool([]);setIdx(0);return;}
     setPool(generateLayoutPool({library, program:prog, cfg, soft, zones}));
     setIdx(0);
-  },[library,prog,W,D,wet,soft,zones,seed,cfg]);
+  },[library,prog,W,D,wet,soft,zones,seed,cfg,feasibility]);
 
   const cornerEls=prog.filter(p=>{const e=library[p.key];return e&&!isDoor(e)&&serviceSides(e).length>1;});
   const hasDoor=prog.some(p=>isDoor(library[p.key]));
@@ -175,6 +178,7 @@ function O2({library}){
           </div>;})}</div>
         {!hasDoor && <div className="warnNote">âš  Soba rabi vsaj ena vrata. Dodaj jih, sicer ni veljavne reÅ¡itve.</div>}
         {cornerEls.length>0 && <div className="warnNote">Kotni elementi rabijo vogalno postavitev â€” pride kasneje.</div>}
+        {!feasibility.feasible && <div className="warnNote"><b>Predhodna izvedljivost</b><br/>{feasibility.reasons.map((r,i)=><span key={i}>{r}<br/></span>)}</div>}
         <div className="eyebrow mt">Realne omejitve sobe</div>
         <button className="add" onClick={()=>setZones(z=>[...z,{id:uid(),x:Math.round(W*0.4),y:Math.round(D*0.35),w:600,h:600}])}>+ prepovedana cona</button>
         {zones.map(z=>(
@@ -198,7 +202,7 @@ function O2({library}){
 
       <main className="cstage">
         <div className="legend mono"><span><i style={{background:"#2b3138"}}/>oprema</span><span><i style={{background:"#e2553f"}}/>jedro</span><span><i style={{background:"#d9a23b",opacity:.5}}/>halo</span><span><i style={{background:"#c0392b"}}/>halo prekrit</span><span><i style={{background:"#5aa9e6"}}/>lok vrat</span><span><i style={{background:"#16b3b3"}}/>mokri zid</span><span><i style={{background:"#3f86c9"}}/>O5 zid</span><span><i style={{background:"#d9a23b"}}/>O5 tla</span></div>
-        <div className="sheet">{best? <O2Plan cand={best} cfg={cfg} zones={zones} routing={routing}/> : <div className="noRes">{!hasDoor?"Dodaj vrata â€” soba brez vrat nima veljavne reÅ¡itve.":soft?"Ni veljavne razporeditve ob teh omejitvah. PoveÄaj prostor ali zrahljaj zahteve.":"V strogem naÄinu ni reÅ¡itve â€” vklopi mehka pravila."}</div>}</div>
+        <div className="sheet">{best? <O2Plan cand={best} cfg={cfg} zones={zones} routing={routing}/> : <div className="noRes">{!feasibility.feasible?<>Brief ni izvedljiv:<br/>{feasibility.reasons.join(" · ")}</>:!hasDoor?"Dodaj vrata â€” soba brez vrat nima veljavne reÅ¡itve.":soft?"Ni veljavne razporeditve ob teh omejitvah. PoveÄaj prostor ali zrahljaj zahteve.":"V strogem naÄinu ni reÅ¡itve â€” vklopi mehka pravila."}</div>}</div>
         <div className="poolBar">{pool.length>0 && <><span className="mono">{pool.length} veljavnih</span>{pool.slice(0,8).map((c,i)=><button key={i} className={"thumb "+(idx===i?"on":"")} onClick={()=>setIdx(i)}><span className="mono">{(c.ev.score*100|0)}</span></button>)}</>}</div>
       </main>
 

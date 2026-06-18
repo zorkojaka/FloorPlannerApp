@@ -3,6 +3,7 @@ import { baseLib } from '../elements/library';
 import { orientation, serviceSides } from '../elements/model';
 import type { PlacedElement, PlacedFixture } from './evaluator';
 import { evalPlace } from './evaluator';
+import { checkFeasibility } from './feasibility';
 import { doorRects, overlapArea, placeRects } from './geometry';
 import { generateLayoutPool } from './generator';
 import { placedConnectionPoint, routeServices } from './routing';
@@ -103,5 +104,46 @@ describe('service routing', () => {
 
     expect(result.blockedCount).toBe(1);
     expect(result.routes.find((route) => route.connection.routesTo === 'floor')?.blocked).toBe(true);
+  });
+});
+
+describe('brief feasibility', () => {
+  it('rejects a room without doors before generation', () => {
+    const library = baseLib();
+    const result = checkFeasibility(library, [{ id: 'toilet', key: 'toilet' }], {
+      W: 1900,
+      D: 2200,
+      wetWall: 'S',
+      minAisle: 800,
+    });
+
+    expect(result.feasible).toBe(false);
+    expect(result.reasons).toContain('soba nima vrat');
+  });
+
+  it('rejects fixed doors that do not fit the selected wall', () => {
+    const library = baseLib();
+    const result = checkFeasibility(library, [{ id: 'door', key: 'door', w: 2300, wall: 'N' }], {
+      W: 1900,
+      D: 2200,
+      wetWall: 'S',
+      minAisle: 800,
+    });
+
+    expect(result.feasible).toBe(false);
+    expect(result.reasons).toContain('vrata Vrata se ne prilegajo izbranemu zidu');
+  });
+
+  it('prevents sampling when feasibility fails', () => {
+    const library = baseLib();
+    const pool = generateLayoutPool({
+      library,
+      program: [{ id: 'toilet', key: 'toilet' }],
+      cfg: { W: 1900, D: 2200, wetWall: 'S', minAisle: 800 },
+      soft: true,
+      samples: 250,
+    });
+
+    expect(pool).toEqual([]);
   });
 });

@@ -7,6 +7,7 @@ import { clamp } from '../shared/math';
 import { isDoor, serviceSides } from '../elements/model';
 import { doorRects, placeRects } from './geometry';
 import { evalPlace } from './evaluator';
+import { checkFeasibility } from './feasibility';
 
 export interface LayoutCandidate {
   placed: PlacedElement[];
@@ -32,6 +33,8 @@ export function generateLayoutPool({
   zones = [],
   samples = 1100,
 }: GenerateLayoutOptions): LayoutCandidate[] {
+  if (!checkFeasibility(library, program, cfg, zones).feasible) return [];
+
   const instances = program
     .map((instance) => ({ ...instance, el: library[instance.key] }))
     .filter((instance): instance is ProgramInstance & { el: Element } => {
