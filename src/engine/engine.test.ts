@@ -12,6 +12,7 @@ import type { LayoutCandidate } from './generator';
 import { applyInducedRules, induceRules } from '../rules/induction';
 import { measureGeneralization, measureInductionHoldout, measurePreferenceGain } from './metrics';
 import { loadJson, saveJson, type JsonStorage } from '../shared/storage';
+import { defaultChannels, effectiveWeight, learnChannelsFromPreference, rankByChannels } from './channels';
 
 describe('element orientation', () => {
   it('derives service sides only from wall-routed connections', () => {
@@ -259,6 +260,35 @@ describe('JSON storage', () => {
     storage.setItem('bad', '{not-json');
 
     expect(loadJson(storage, 'bad', { ok: true })).toEqual({ ok: true });
+  });
+});
+
+describe('channel test bench', () => {
+  it('mixes prior and learned weight by confidence', () => {
+    const channel = { ...defaultChannels()[0], prior: 0.8, learned: 0.2, confidence: 0.75 };
+
+    expect(effectiveWeight(channel)).toBeCloseTo(0.65);
+  });
+
+  it('updates learned channel weights from selected candidate behavior', () => {
+    const channels = defaultChannels();
+    const selected = candidateWith({ halo: 0, drain: 500, score: 0.8 });
+    const rejected = candidateWith({ halo: 0, drain: 3000, score: 0.4 });
+    const next = learnChannelsFromPreference(channels, selected, rejected, { W: 1900, D: 2200, wetWall: 'S', minAisle: 800 });
+
+    expect(next.find((channel) => channel.id === 'drain-distance')!.learned).toBeGreaterThan(
+      channels.find((channel) => channel.id === 'drain-distance')!.learned,
+    );
+  });
+
+  it('ranks candidates through enabled channel scores', () => {
+    const channels = defaultChannels().map((channel) =>
+      channel.id === 'drain-distance' ? { ...channel, prior: 1, learned: 1, confidence: 1 } : { ...channel, enabled: false },
+    );
+    const good = candidateWith({ halo: 0, drain: 300, score: 0.2 });
+    const bad = candidateWith({ halo: 0, drain: 3000, score: 0.9 });
+
+    expect(rankByChannels([bad, good], channels, { W: 1900, D: 2200, wetWall: 'S', minAisle: 800 })[0]).toBe(good);
   });
 });
 

@@ -7,6 +7,7 @@ import { routeServices } from "./engine/routing";
 import { checkFeasibility } from "./engine/feasibility";
 import { initialPreferenceState, rankByPreference, recordPreference } from "./engine/preference";
 import { measureGeneralization, measureInductionHoldout, measurePreferenceGain } from "./engine/metrics";
+import { defaultChannels, effectiveWeight, learnChannelsFromPreference, rankByChannels, scoreCandidateChannels } from "./engine/channels";
 import { applyInducedRules, induceRules, parseReferenceJson } from "./rules/induction";
 import { clamp, uid } from "./shared/math";
 import { loadJson, saveJson } from "./shared/storage";
@@ -230,6 +231,7 @@ function O2({library}){
   const setZone=(id,patch)=>setZones(Z=>Z.map(z=>z.id===id?{...z,...patch}:z));
   const [pool,setPool]=useState([]); const [idx,setIdx]=useState(0); const [seed,setSeed]=useState(0);
   const [pref,setPref]=usePersistentState("floorplanner.preference",initialPreferenceState);
+  const [channels,setChannels]=usePersistentState("floorplanner.channels",defaultChannels);
   const cfg=useMemo(()=>({W,D,wetWall:wet,minAisle:800}),[W,D,wet]);
   const feasibility=useMemo(()=>checkFeasibility(library,prog,cfg,zones),[library,prog,cfg,zones]);
 
@@ -243,13 +245,17 @@ function O2({library}){
   const hasDoor=prog.some(p=>isDoor(library[p.key]));
   const best=pool[idx];
   const optionA=pool[0], optionB=pool[1];
+  const bestChannelScores=best?scoreCandidateChannels(best,channels,cfg):null;
   const routing=useMemo(()=>best?routeServices(best.placed,cfg,{allowFloorRoutes}):null,[best,cfg,allowFloorRoutes]);
   const choosePreference=(selected,rejected)=>setPref(prev=>{
     const next=recordPreference(prev,selected,rejected);
-    setPool(P=>rankByPreference(P,next.weights));
+    const learnedChannels=learnChannelsFromPreference(channels,selected,rejected,cfg);
+    setChannels(learnedChannels);
+    setPool(P=>rankByChannels(rankByPreference(P,next.weights),learnedChannels,cfg));
     setIdx(0);
     return next;
   });
+  const setChannel=(id,patch)=>setChannels(C=>C.map(c=>c.id===id?{...c,...patch}:c));
   const setInst=(id,patch)=>setProg(P=>P.map(p=>p.id===id?{...p,...patch}:p));
   return (
    <div className="o2">
@@ -334,6 +340,24 @@ function O2({library}){
             <div className="prefBars"><span>donos <b className="mono">{Math.round(measurePreferenceGain(pref)*100)}</b></span><span>stabilnost <b className="mono">{pref.stableStreak}</b></span></div>
             <div className={pref.converged?"conv on":"conv"}>{pref.converged?`konvergenca po ${pref.comparisons} primerjavah`:`${pref.comparisons} primerjav · signal ${pref.dominantSignal}`}</div>
           </div> : <div className="soft2 none">Za A/B sta potrebni vsaj dve veljavni rešitvi.</div>}
+          <div className="eyebrow mt">Testna miza kanalov</div>
+          <div className="channelBench">
+            {channels.map(ch=>{
+              const score=bestChannelScores?.scores.find(s=>s.channelId===ch.id);
+              return <div key={ch.id} className={"channelCard "+(!ch.enabled?"off":"")}>
+                <div className="chTop"><label><input type="checkbox" checked={ch.enabled} onChange={e=>setChannel(ch.id,{enabled:e.target.checked})}/> {ch.name}</label><span>{ch.family}</span></div>
+                <div className="chScope"><button className={ch.scope==="global"?"on":""} onClick={()=>setChannel(ch.id,{scope:"global"})}>global</button><button className={ch.scope==="room-type"?"on":""} onClick={()=>setChannel(ch.id,{scope:"room-type"})}>room</button></div>
+                <label className="chSlider">prior <input type="range" min="0" max="1" step="0.01" value={ch.prior} onChange={e=>setChannel(ch.id,{prior:+e.target.value})}/><b className="mono">{Math.round(ch.prior*100)}</b></label>
+                <label className="chSlider">zaup. <input type="range" min="0" max="1" step="0.01" value={ch.confidence} onChange={e=>setChannel(ch.id,{confidence:+e.target.value})}/><b className="mono">{Math.round(ch.confidence*100)}</b></label>
+                <div className="chBars">
+                  <span style={{"--w":`${ch.prior*100}%`}}>prior</span>
+                  <span style={{"--w":`${ch.learned*100}%`}}>learned</span>
+                  <span style={{"--w":`${effectiveWeight(ch)*100}%`}}>eff</span>
+                </div>
+                <div className="chScore">score <b className="mono">{score?Math.round(score.value*100):"-"}</b></div>
+              </div>
+            })}
+          </div>
         </> : <div className="noRes2">Ni veljavne rešitve za te zahteve.</div>}
       </aside>
     </div>
@@ -480,6 +504,13 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .abBtns{display:grid;grid-template-columns:1fr 1fr;gap:7px}.abBtns button{border:1px solid var(--bd);background:var(--bg);color:var(--tx);border-radius:7px;padding:8px;cursor:pointer;font-size:12px}.abBtns button:hover{border-color:var(--cy);color:var(--cy)}
 .prefBars{display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:10.5px;color:var(--mut)}.prefBars span{background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:6px}.prefBars b{color:var(--cy);float:right}
 .conv{font-size:10.5px;color:var(--mut);border:1px solid var(--bd);border-radius:6px;padding:7px;background:var(--bg)}.conv.on{color:#7fdede;border-color:#1f4444;background:#13282a}
+.channelBench{display:flex;flex-direction:column;gap:8px}
+.channelCard{background:var(--p2);border:1px solid var(--bd);border-radius:8px;padding:9px;display:flex;flex-direction:column;gap:7px}.channelCard.off{opacity:.52}
+.chTop{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:11px}.chTop label{display:flex;align-items:center;gap:6px;color:var(--tx)}.chTop span{font-size:9px;color:var(--mut);text-transform:uppercase}
+.chScope{display:grid;grid-template-columns:1fr 1fr;gap:5px}.chScope button{background:var(--bg);border:1px solid var(--bd);color:var(--mut);border-radius:6px;padding:5px;font-size:10px;cursor:pointer}.chScope button.on{border-color:var(--cy);color:var(--cy)}
+.chSlider{display:grid;grid-template-columns:38px 1fr 28px;gap:6px;align-items:center;font-size:10px;color:var(--mut)}.chSlider input{height:3px}.chSlider b{color:var(--cy);text-align:right}
+.chBars{display:grid;gap:4px}.chBars span{position:relative;overflow:hidden;background:var(--bg);border:1px solid var(--bd);border-radius:5px;padding:4px 6px;font-size:9.5px;color:var(--mut)}.chBars span:before{content:"";position:absolute;inset:0 auto 0 0;width:var(--w);background:#16b3b333}.chBars span{z-index:0}.chBars span::after{content:"";position:relative}
+.chScore{font-size:10px;color:var(--mut)}.chScore b{float:right;color:var(--cy)}
 .refBox{width:100%;min-height:420px;resize:vertical;background:var(--bg);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:10.5px;line-height:1.45;padding:10px}
 .ruleStage{flex:1;margin:0 16px 16px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;align-content:start}
 .ruleCard{background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:12px}.rHead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:10px}.rHead b{font-size:13px}.rHead span{font-size:10px;color:var(--mut)}
