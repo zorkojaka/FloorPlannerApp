@@ -7,7 +7,7 @@ export function baseLib(): ElementLibrary {
   return {
     toilet: {
       category: 'toilet',
-      name: 'WC skoljka',
+      name: 'WC školjka',
       w: 400,
       d: 600,
       source: 'default',

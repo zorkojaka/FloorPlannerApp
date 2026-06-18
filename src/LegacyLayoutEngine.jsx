@@ -12,27 +12,28 @@ import { clamp, uid } from "./shared/math";
 import { loadJson, saveJson } from "./shared/storage";
 
 /* =========================================================================
-   ZAKLENJEN SISTEM â€” harmonika orehov
-   O1 model elementa (zlozljiv) Â· O2 postavitev (trda jedra / mehki halo) Â·
-   O5 instalacije (prihaja) Â· O9 indukcija iz IFC (prihaja)
+   ZAKLENJEN SISTEM - harmonika orehov
+   O1 model elementa (zložljiv) · O2 postavitev (trda jedra / mehki halo) ·
+   O5 instalacije · O9 indukcija pravil
    ========================================================================= */
 
-/* ===================== APP â€” harmonika ===================== */
+/* ===================== APP - harmonika ===================== */
 export default function App(){
   const [library,setLibrary]=usePersistentState("floorplanner.library",baseLib);
   const [open,setOpen]=useState("O2");
+  useEffect(()=>setLibrary(L=>normalizeLibraryText(L)),[setLibrary]);
   const steps=[
-    {id:"O1",title:"Model elementa",sub:"priklopi doloÄajo orientacijo Â· clearance kot spekter",status:"deluje"},
-    {id:"O2",title:"Postavitev v sobo",sub:"trda jedra se ne prekrivajo Â· halo se sme (s kaznijo)",status:"deluje"},
-    {id:"O5",title:"Instalacije / routing",sub:"trase od priklopov do mokrega zidu Â· stene/tla",status:"deluje"},
-    {id:"O9",title:"Indukcija pravil",sub:"strukturirane reference â†’ Envelope pravila",status:"deluje"},
+    {id:"O1",title:"Model elementa",sub:"priklopi določajo orientacijo · clearance kot spekter",status:"deluje"},
+    {id:"O2",title:"Postavitev v sobo",sub:"trda jedra se ne prekrivajo · halo se sme (s kaznijo)",status:"deluje"},
+    {id:"O5",title:"Instalacije / routing",sub:"trase od priklopov do mokrega zidu · stene/tla",status:"deluje"},
+    {id:"O9",title:"Indukcija pravil",sub:"strukturirane reference → Envelope pravila",status:"deluje"},
   ];
   return (
     <div className="app">
       <style>{CSS}</style>
       <div className="appHd">
-        <span className="brand">â—« Layout Engine</span>
-        <span className="bcrumb mono">oreh 1 Â· postavitev pohistva v sobo</span>
+        <span className="brand">◫ Layout Engine</span>
+        <span className="bcrumb mono">oreh 1 · postavitev opreme v sobo</span>
       </div>
       {steps.map(s=>(
         <section key={s.id} className={"step "+(open===s.id?"open":"")}>
@@ -40,7 +41,7 @@ export default function App(){
             <span className="stepTag">{s.id}</span>
             <span className="stepTtl"><b>{s.title}</b><i>{s.sub}</i></span>
             <span className={"stepStatus "+(s.status==="deluje"?"ok":"soon")}>{s.status}</span>
-            <span className="chev">{open===s.id?"â–¾":"â–¸"}</span>
+            <span className="chev">{open===s.id?"▾":"▸"}</span>
           </button>
           {open===s.id && <div className="stepBody">
             {s.id==="O1" && <O1 library={library} setLibrary={setLibrary}/>}
@@ -54,6 +55,13 @@ export default function App(){
   );
 }
 
+function normalizeLibraryText(library){
+  if(library.toilet?.name!=="WC skoljka") return library;
+  const next=JSON.parse(JSON.stringify(library));
+  next.toilet.name="WC školjka";
+  return next;
+}
+
 function usePersistentState(key,initial){
   const [value,setValue]=useState(()=>loadJson(typeof window==="undefined"?undefined:window.localStorage,key,typeof initial==="function"?initial():initial));
   useEffect(()=>saveJson(typeof window==="undefined"?undefined:window.localStorage,key,value),[key,value]);
@@ -62,8 +70,8 @@ function usePersistentState(key,initial){
 
 function Soon({id}){
   const txt=id==="O5"
-    ? "Routing instalacij je aktiven v O2 pogledu: trase teÄejo od dejanskih priklopnih toÄk do mokrega zidu, z dolÅ¾inami, politiko talnih tras in oznaÄenimi kriÅ¾anji."
-    : "Indukcija: AI prebere reference/IFC in izluÅ¡Äi pravila v ENVELOPE obliki (jedro/halo/nasiÄenje/zaupanje), ki zamenjajo roÄno vpisane vrednosti iz O1. Steklena Å¡katla pokaÅ¾e sklepanje.";
+    ? "Routing instalacij je aktiven v O2 pogledu: trase tečejo od dejanskih priklopnih točk do mokrega zidu, z dolžinami, politiko talnih tras in označenimi križanji."
+    : "Indukcija: AI prebere reference/IFC in izlušči pravila v ENVELOPE obliki (jedro/halo/nasičenje/zaupanje), ki zamenjajo ročno vpisane vrednosti iz O1. Steklena škatla pokaže sklepanje.";
   return <div className="soon">{txt}</div>;
 }
 
@@ -98,40 +106,40 @@ function O9({library,setLibrary}){
     <aside className="col">
       <div className="eyebrow">Reference JSON</div>
       <textarea className="refBox" value={raw} onChange={e=>setRaw(e.target.value)} spellCheck="false"/>
-      <button className="regen" onClick={run}>IzluÅ¡Äi pravila</button>
-      {rules.length>0&&<button className="regen" onClick={apply}>Uporabi v knjiÅ¾nici</button>}
+      <button className="regen" onClick={run}>Izlušči pravila</button>
+      {rules.length>0&&<button className="regen" onClick={apply}>Uporabi v knjižnici</button>}
       {err&&<div className="warnNote">{err}</div>}
     </aside>
     <main className="cstage">
       <div className="legend mono"><span><i style={{background:"#e2553f"}}/>core</span><span><i style={{background:"#d9a23b"}}/>halo</span><span><i style={{background:"#5bbd8b"}}/>sat</span><span><i style={{background:"#16b3b3"}}/>conf</span></div>
       <div className="ruleStage">
-        {rules.length===0?<div className="noRes">Vnesi strukturirane reference in izluÅ¡Äi Envelope pravila. Zamenjava referenc spremeni generacijo brez spremembe kode.</div>:
+        {rules.length===0?<div className="noRes">Vnesi strukturirane reference in izlušči Envelope pravila. Zamenjava referenc spremeni generacijo brez spremembe kode.</div>:
           <>
           {metrics&&<div className="ruleCard metricCard">
             <div className="rHead"><b>Merilne osi</b><span>MVP</span></div>
             <div className="envGrid">
               <span>indukcija <b>{Math.round(metrics.induction.score*100)}</b></span>
               <span>holdout <b>{metrics.induction.holdoutCount}</b></span>
-              <span>posploÅ¡itev <b>{Math.round(metrics.generalization.score*100)}</b></span>
+              <span>posplošitev <b>{Math.round(metrics.generalization.score*100)}</b></span>
               <span>avg conf <b>{metrics.generalization.averageConfidence.toFixed(2)}</b></span>
             </div>
-            <div className="ruleMeta">MAE {Math.round(metrics.induction.meanAbsoluteError)} mm Â· train {metrics.induction.trainCount}</div>
+            <div className="ruleMeta">MAE {Math.round(metrics.induction.meanAbsoluteError)} mm · train {metrics.induction.trainCount}</div>
           </div>}
           {rules.map(r=><div key={r.id} className="ruleCard">
-            <div className="rHead"><b>{library[r.elementKey]?.name||r.elementKey}</b><span>{r.parameter} Â· {r.envelope.scope}</span></div>
+            <div className="rHead"><b>{library[r.elementKey]?.name||r.elementKey}</b><span>{r.parameter} · {r.envelope.scope}</span></div>
             <div className="envGrid">
               <span>core <b>{r.envelope.core}</b></span><span>halo <b>{r.envelope.halo}</b></span><span>sat <b>{r.envelope.sat}</b></span><span>conf <b>{r.envelope.conf.toFixed(2)}</b></span>
             </div>
-            <div className="ruleMeta">n={r.count} Â· mean {Math.round(r.mean)} Â· variance {Math.round(r.variance)}</div>
-            <div className="refs">{r.references.join(" Â· ")}</div>
+            <div className="ruleMeta">n={r.count} · mean {Math.round(r.mean)} · variance {Math.round(r.variance)}</div>
+            <div className="refs">{r.references.join(" · ")}</div>
           </div>)}
           </>}
       </div>
     </main>
     <aside className="col">
-      <div className="eyebrow">Trenutna knjiÅ¾nica</div>
+      <div className="eyebrow">Trenutna knjižnica</div>
       {Object.entries(library).filter(([k,e])=>!isDoor(e)).map(([k,e])=><div key={k} className="libRule">
-        <b>{e.name}</b><span className="mono">{e.clear.core}/{e.clear.halo}/{e.clear.sat} Â· {e.clear.conf.toFixed(2)}</span><i>{e.clear.scope} Â· {e.source}</i>
+        <b>{e.name}</b><span className="mono">{e.clear.core}/{e.clear.halo}/{e.clear.sat} · {e.clear.conf.toFixed(2)}</span><i>{e.clear.scope} · {e.source}</i>
       </div>)}
     </aside>
   </div>;
@@ -151,7 +159,7 @@ function O1({library,setLibrary}){
    <div className="o1" onPointerMove={onMove} onPointerUp={()=>setDrag(null)} onPointerLeave={()=>setDrag(null)}>
     <div className="grid3">
       <aside className="col">
-        <div className="eyebrow">Knjiznica</div>
+        <div className="eyebrow">Knjižnica</div>
         {Object.entries(library).filter(([k,e])=>!isDoor(e)).map(([k,e])=>(
           <button key={k} className={"litem "+(sel===k?"on":"")} onClick={()=>{setSel(k);setSelConn(null);}}>
             <span>{e.name}</span><span className={"src "+e.source}>{e.source==="user"?"uporabnik":"privzeto"}</span></button>))}
@@ -179,7 +187,7 @@ function O1({library,setLibrary}){
             {ss.includes("front")&&<line x1={R.x} y1={R.y+R.h} x2={R.x+R.w} y2={R.y+R.h} stroke="#16b3b3" strokeWidth="46"/>}
             {ss.includes("left")&&<line x1={R.x} y1={R.y} x2={R.x} y2={R.y+R.h} stroke="#16b3b3" strokeWidth="46"/>}
             {ss.includes("right")&&<line x1={R.x+R.w} y1={R.y} x2={R.x+R.w} y2={R.y+R.h} stroke="#16b3b3" strokeWidth="46"/>}
-            <text x={0} y={0} fill="#5a6675" fontSize="120" fontFamily="ui-monospace,Menlo,monospace" textAnchor="middle" dy="42">{el.w}Ã—{el.d}</text>
+            <text x={0} y={0} fill="#5a6675" fontSize="120" fontFamily="ui-monospace,Menlo,monospace" textAnchor="middle" dy="42">{el.w}×{el.d}</text>
             {el.conns.map(c=>{const p=connXY(c,R);const col=CONN[c.type].color;
               return<g key={c.id} style={{cursor:"grab"}} onPointerDown={e=>{e.stopPropagation();setDrag(c.id);setSelConn(c.id);}}>
                 {c.routesTo==="floor"&&<circle cx={p.x} cy={p.y} r="92" fill="none" stroke={col} strokeWidth="14" strokeDasharray="40 34"/>}
@@ -187,18 +195,18 @@ function O1({library,setLibrary}){
                 <text x={p.x} y={p.y} fill="#fff" textAnchor="middle" dy="34" fontSize="62" fontWeight="700" fontFamily="ui-monospace,Menlo,monospace">{CONN[c.type].short}</text></g>;})}
           </svg>
         </div>
-        <div className={"oriBar "+(ori.warn?"warn":"")}>{ori.warn?"âš  ":""}{ori.txt}</div>
+        <div className={"oriBar "+(ori.warn?"warn":"")}>{ori.warn?"⚠ ":""}{ori.txt}</div>
       </main>
       <aside className="col">
         <div className="eyebrow">Dimenzije</div>
-        <Num label="Sirina" v={el.w} set={v=>patch(e=>e.w=v)} min={250} max={2000} step={10}/>
+        <Num label="Širina" v={el.w} set={v=>patch(e=>e.w=v)} min={250} max={2000} step={10}/>
         <Num label="Globina" v={el.d} set={v=>patch(e=>e.d=v)} min={250} max={2500} step={10}/>
         <div className="eyebrow mt">Priklopi</div>
         {el.conns.map(c=>(
           <div key={c.id} className={"conn "+(selConn===c.id?"on":"")} onClick={()=>setSelConn(c.id)}>
             <div className="connTop"><span className="cdot" style={{background:CONN[c.type].color}}/>
               <select value={c.type} onChange={e=>patch(el=>{el.conns.find(x=>x.id===c.id).type=e.target.value;})}>{Object.entries(CONN).map(([k,v])=><option key={k} value={k}>{v.name}</option>)}</select>
-              <button className="del" onClick={ev=>{ev.stopPropagation();patch(el=>el.conns=el.conns.filter(x=>x.id!==c.id));}}>Ã—</button></div>
+              <button className="del" onClick={ev=>{ev.stopPropagation();patch(el=>el.conns=el.conns.filter(x=>x.id!==c.id));}}>×</button></div>
             <div className="connRow"><span className="lbl">stran</span><div className="sideBtns">{Object.entries(SIDES).map(([k,v])=><button key={k} className={c.side===k?"on":""} onClick={()=>patch(el=>el.conns.find(x=>x.id===c.id).side=k)}>{v}</button>)}</div></div>
             <div className="connRow"><span className="lbl">vodi v</span><div className="rt"><button className={c.routesTo==="wall"?"on":""} onClick={()=>patch(el=>el.conns.find(x=>x.id===c.id).routesTo="wall")}>zid</button><button className={c.routesTo==="floor"?"on":""} onClick={()=>patch(el=>el.conns.find(x=>x.id===c.id).routesTo="floor")}>tla</button></div></div>
           </div>))}
@@ -206,13 +214,13 @@ function O1({library,setLibrary}){
         <div className="eyebrow mt">Clearance envelope</div>
         <Num label="Jedro (trdo)" v={el.clear.core} set={v=>patch(e=>e.clear.core=Math.min(v,e.clear.halo-10))} min={200} max={1200} step={10} c="#e2553f"/>
         <Num label="Halo (mehko)" v={el.clear.halo} set={v=>patch(e=>e.clear.halo=clamp(v,e.clear.core+10,e.clear.sat-10))} min={300} max={1500} step={10} c="#d9a23b"/>
-        <button className="reset" onClick={reset}>â†» Ponastavi</button>
+        <button className="reset" onClick={reset}>↻ Ponastavi</button>
       </aside>
     </div>
    </div>);
 }
 
-/* ===================== O2 â€” postavitev ===================== */
+/* ===================== O2 - postavitev ===================== */
 function O2({library}){
   const [W,setW]=usePersistentState("floorplanner.project.W",1900),[D,setD]=usePersistentState("floorplanner.project.D",2200),[wet,setWet]=usePersistentState("floorplanner.project.wetWall","S");
   const [prog,setProg]=usePersistentState("floorplanner.project.program",()=>[{id:uid(),key:"door",w:800,dir:"auto",wall:"auto",hinge:"auto"},{id:uid(),key:"toilet"},{id:uid(),key:"sink"}]);
@@ -248,69 +256,69 @@ function O2({library}){
     <div className="grid3">
       <aside className="col">
         <div className="eyebrow">Prostor</div>
-        <Num label="Sirina" v={W} set={setW} min={1200} max={5000} step={50}/>
+        <Num label="Širina" v={W} set={setW} min={1200} max={5000} step={50}/>
         <Num label="Globina" v={D} set={setD} min={1400} max={5000} step={50}/>
         <div className="wp"><span>Mokri zid</span><div className="rt wgrid">{["N","E","S","W"].map(w=><button key={w} className={wet===w?"on":""} onClick={()=>setWet(w)}>{({N:"sever",E:"vzhod",S:"jug",W:"zahod"})[w]}</button>)}</div></div>
         <div className="eyebrow mt">Program</div>
         <div className="addRow">{Object.entries(library).map(([k,e])=><button key={k} onClick={()=>setProg(p=>[...p,{id:uid(),key:k,...(isDoor(e)?{w:800,dir:"auto",wall:"auto",hinge:"auto"}:{})}])}>+ {e.name}</button>)}</div>
         <div className="progList">{prog.map(p=>{const e=library[p.key];const door=isDoor(e);
           return <div key={p.id} className={"pItem "+(door?"door":"")}>
-            <div className="pTop"><span>{e.name}{door?` (${p.w})`:""}</span><button onClick={()=>setProg(P=>P.filter(x=>x.id!==p.id))}>Ã—</button></div>
+            <div className="pTop"><span>{e.name}{door?` (${p.w})`:""}</span><button onClick={()=>setProg(P=>P.filter(x=>x.id!==p.id))}>×</button></div>
             {door && <div className="dCfg">
-              <div className="dRow"><span>Å¡irina</span><div className="rt3">{[700,800,900].map(w=><button key={w} className={p.w===w?"on":""} onClick={()=>setInst(p.id,{w})}>{w}</button>)}</div></div>
+              <div className="dRow"><span>širina</span><div className="rt3">{[700,800,900].map(w=><button key={w} className={p.w===w?"on":""} onClick={()=>setInst(p.id,{w})}>{w}</button>)}</div></div>
               <div className="dRow"><span>smer</span><div className="rt3">{[["auto","auto"],["inward","Noter"],["outward","Ven"]].map(([v,l])=><button key={v} className={p.dir===v?"on":""} onClick={()=>setInst(p.id,{dir:v})}>{l}</button>)}</div></div>
-              <div className="dRow"><span>teÄaj</span><div className="rt3">{[["auto","auto"],[0,"Levo"],[1,"Desno"]].map(([v,l])=><button key={String(v)} className={p.hinge===v?"on":""} onClick={()=>setInst(p.id,{hinge:v})}>{l}</button>)}</div></div>
+              <div className="dRow"><span>tečaj</span><div className="rt3">{[["auto","auto"],[0,"Levo"],[1,"Desno"]].map(([v,l])=><button key={String(v)} className={p.hinge===v?"on":""} onClick={()=>setInst(p.id,{hinge:v})}>{l}</button>)}</div></div>
               <div className="dRow"><span>zid</span><div className="rt3 wrap">{[["auto","auto"],["N","S"],["E","V"],["S","J"],["W","Z"]].map(([v,l])=><button key={v} className={p.wall===v?"on":""} onClick={()=>setInst(p.id,{wall:v})}>{l}</button>)}</div></div>
               <div className="dRow"><span>poz.</span><div className="rt3"><button className={p.fixedPos?"on":""} onClick={()=>setInst(p.id,{fixedPos:!p.fixedPos})}>{p.fixedPos?"fiksna":"prosta"}</button></div></div>
               {p.fixedPos && <input type="range" min="0" max="1" step="0.02" value={p.fpos??0.5} onChange={e=>setInst(p.id,{fpos:+e.target.value})} style={{width:"100%",marginTop:2,accentColor:"#5aa9e6"}}/>}
             </div>}
           </div>;})}</div>
-        {!hasDoor && <div className="warnNote">âš  Soba rabi vsaj ena vrata. Dodaj jih, sicer ni veljavne reÅ¡itve.</div>}
-        {cornerEls.length>0 && <div className="warnNote">Kotni elementi rabijo vogalno postavitev â€” pride kasneje.</div>}
+        {!hasDoor && <div className="warnNote">⚠ Soba rabi vsaj ena vrata. Dodaj jih, sicer ni veljavne rešitve.</div>}
+        {cornerEls.length>0 && <div className="warnNote">Kotni elementi rabijo vogalno postavitev - pride kasneje.</div>}
         {!feasibility.feasible && <div className="warnNote"><b>Predhodna izvedljivost</b><br/>{feasibility.reasons.map((r,i)=><span key={i}>{r}<br/></span>)}</div>}
         <div className="eyebrow mt">Realne omejitve sobe</div>
         <button className="add" onClick={()=>setZones(z=>[...z,{id:uid(),x:Math.round(W*0.4),y:Math.round(D*0.35),w:600,h:600}])}>+ prepovedana cona</button>
         {zones.map(z=>(
           <div key={z.id} className="zone">
-            <div className="zTop"><span>prepovedana cona</span><button onClick={()=>setZones(Z=>Z.filter(x=>x.id!==z.id))}>Ã—</button></div>
+            <div className="zTop"><span>prepovedana cona</span><button onClick={()=>setZones(Z=>Z.filter(x=>x.id!==z.id))}>×</button></div>
             <div className="zGrid">
               <ZNum label="x" v={z.x} set={v=>setZone(z.id,{x:v})} max={W}/>
               <ZNum label="y" v={z.y} set={v=>setZone(z.id,{y:v})} max={D}/>
-              <ZNum label="Å¡" v={z.w} set={v=>setZone(z.id,{w:v})} max={W}/>
+              <ZNum label="š" v={z.w} set={v=>setZone(z.id,{w:v})} max={W}/>
               <ZNum label="g" v={z.h} set={v=>setZone(z.id,{h:v})} max={D}/>
             </div>
           </div>
         ))}
-        <div className="ifaceNote">Vmesnik omejitev: zdaj jih vnaÅ¡aÅ¡ ti (steber, okno, obstojeÄa vrata). Kasneje jih engine za razporeditev sob napolni sam â€” kje so vrata, koliko mÂ².</div>
+        <div className="ifaceNote">Vmesnik omejitev: zdaj jih vnašaš ti (steber, okno, obstoječa vrata). Kasneje jih engine za razporeditev sob napolni sam - kje so vrata, koliko m².</div>
         <label className="softTgl"><input type="checkbox" checked={soft} onChange={e=>setSoft(e.target.checked)}/> <span>Mehka pravila: halo se sme upogniti</span></label>
-        <div className="softNote">{soft?"Halo se sme prekriti (kazen). Lok vrat ostane TRDO pravilo â€” vanj nikoli.":"Strogo: vsako prekrivanje halo = zavrnitev."}</div>
+        <div className="softNote">{soft?"Halo se sme prekriti (kazen). Lok vrat ostane TRDO pravilo - vanj nikoli.":"Strogo: vsako prekrivanje halo = zavrnitev."}</div>
         <label className="softTgl"><input type="checkbox" checked={allowFloorRoutes} onChange={e=>setAllowFloorRoutes(e.target.checked)}/> <span>O5: talne trase dovoljene</span></label>
-        <div className="softNote">{allowFloorRoutes?"Priklopi, ki vodijo v tla, se lahko trasirajo po ploÅ¡Äi.":"Talne trase ostanejo vidne, vendar so oznaÄene kot blokirane."}</div>
-        <button className="regen" onClick={()=>setSeed(s=>s+1)}>â†» Generiraj</button>
+        <div className="softNote">{allowFloorRoutes?"Priklopi, ki vodijo v tla, se lahko trasirajo po plošči.":"Talne trase ostanejo vidne, vendar so označene kot blokirane."}</div>
+        <button className="regen" onClick={()=>setSeed(s=>s+1)}>↻ Generiraj</button>
       </aside>
 
       <main className="cstage">
         <div className="legend mono"><span><i style={{background:"#2b3138"}}/>oprema</span><span><i style={{background:"#e2553f"}}/>jedro</span><span><i style={{background:"#d9a23b",opacity:.5}}/>halo</span><span><i style={{background:"#c0392b"}}/>halo prekrit</span><span><i style={{background:"#5aa9e6"}}/>lok vrat</span><span><i style={{background:"#16b3b3"}}/>mokri zid</span><span><i style={{background:"#3f86c9"}}/>O5 zid</span><span><i style={{background:"#d9a23b"}}/>O5 tla</span></div>
-        <div className="sheet">{best? <O2Plan cand={best} cfg={cfg} zones={zones} routing={routing}/> : <div className="noRes">{!feasibility.feasible?<>Brief ni izvedljiv:<br/>{feasibility.reasons.join(" · ")}</>:!hasDoor?"Dodaj vrata â€” soba brez vrat nima veljavne reÅ¡itve.":soft?"Ni veljavne razporeditve ob teh omejitvah. PoveÄaj prostor ali zrahljaj zahteve.":"V strogem naÄinu ni reÅ¡itve â€” vklopi mehka pravila."}</div>}</div>
+        <div className="sheet">{best? <O2Plan cand={best} cfg={cfg} zones={zones} routing={routing}/> : <div className="noRes">{!feasibility.feasible?<>Brief ni izvedljiv:<br/>{feasibility.reasons.join(" · ")}</>:!hasDoor?"Dodaj vrata - soba brez vrat nima veljavne rešitve.":soft?"Ni veljavne razporeditve ob teh omejitvah. Povečaj prostor ali zrahljaj zahteve.":"V strogem načinu ni rešitve - vklopi mehka pravila."}</div>}</div>
         <div className="poolBar">{pool.length>0 && <><span className="mono">{pool.length} veljavnih</span>{pool.slice(0,8).map((c,i)=><button key={i} className={"thumb "+(idx===i?"on":"")} onClick={()=>setIdx(i)}><span className="mono">{(c.ev.score*100|0)}</span></button>)}</>}</div>
       </main>
 
       <aside className="col">
         {best? <>
-          <div className="eyebrow">Preverba pravil Â· ocena <span className="mono">{(best.ev.score*100|0)}</span></div>
-          <div className="check ok2">âœ“ trda jedra se ne prekrivajo</div>
-          <div className="check ok2">âœ“ lok vrat prost (P-01)</div>
-          <div className="check ok2">âœ“ prehod {Math.round(best.ev.aisle)} mm â‰¥ {cfg.minAisle}</div>
+          <div className="eyebrow">Preverba pravil · ocena <span className="mono">{(best.ev.score*100|0)}</span></div>
+          <div className="check ok2">✓ trda jedra se ne prekrivajo</div>
+          <div className="check ok2">✓ lok vrat prost (P-01)</div>
+          <div className="check ok2">✓ prehod {Math.round(best.ev.aisle)} mm ≥ {cfg.minAisle}</div>
           <div className="eyebrow mt">Mehke kazni (halo)</div>
           {best.ev.overlaps.length>0 ? best.ev.overlaps.map((o,i)=>(
-            <div key={i} className="soft2"><span className="sw"/>{o.a} â†” {o.b}<br/><span className="mono">{(o.area/1e6).toFixed(2)} mÂ² â†’ dovoljeno, kaznovano</span></div>
-          )) : <div className="soft2 none">brez prekrivanj halo â€” Äista razporeditev</div>}
+            <div key={i} className="soft2"><span className="sw"/>{o.a} ↔ {o.b}<br/><span className="mono">{(o.area/1e6).toFixed(2)} m² → dovoljeno, kaznovano</span></div>
+          )) : <div className="soft2 none">brez prekrivanj halo - čista razporeditev</div>}
           <div className="eyebrow mt">Instalacije</div>
-          <div className="drain"><span className="mono">{((routing?.totalLength||0)/1000).toFixed(2)} m</span> skupne trase<br/><i>O5 raÄuna od dejanske priklopne toÄke</i></div>
-          {routing?.blockedCount>0 && <div className="warnNote">{routing.blockedCount} talnih tras je blokiranih po politiki ploÅ¡Äe.</div>}
-          {routing?.floorCrossingCount>0 && <div className="warnNote">{routing.floorCrossingCount} talnih tras ima kriÅ¾anje.</div>}
+          <div className="drain"><span className="mono">{((routing?.totalLength||0)/1000).toFixed(2)} m</span> skupne trase<br/><i>O5 računa od dejanske priklopne točke</i></div>
+          {routing?.blockedCount>0 && <div className="warnNote">{routing.blockedCount} talnih tras je blokiranih po politiki plošče.</div>}
+          {routing?.floorCrossingCount>0 && <div className="warnNote">{routing.floorCrossingCount} talnih tras ima križanje.</div>}
           <div className="routeList">{routing?.routes.map(r=><div key={r.id} className={"routeItem "+r.via+(r.blocked?" blocked":"")}>
-            <span>{r.fixtureName} Â· {CONN[r.connection.type].short} Â· {r.via==="floor"?"tla":"zid"}</span>
+            <span>{r.fixtureName} · {CONN[r.connection.type].short} · {r.via==="floor"?"tla":"zid"}</span>
             <b className="mono">{(r.length/1000).toFixed(2)} m</b>
           </div>)}</div>
           <div className="eyebrow mt">A/B preference</div>
@@ -324,9 +332,9 @@ function O2({library}){
               <span>odtok <b className="mono">{Math.round(pref.weights.drain*100)}</b></span>
             </div>
             <div className="prefBars"><span>donos <b className="mono">{Math.round(measurePreferenceGain(pref)*100)}</b></span><span>stabilnost <b className="mono">{pref.stableStreak}</b></span></div>
-            <div className={pref.converged?"conv on":"conv"}>{pref.converged?`konvergenca po ${pref.comparisons} primerjavah`:`${pref.comparisons} primerjav Â· signal ${pref.dominantSignal}`}</div>
-          </div> : <div className="soft2 none">Za A/B sta potrebni vsaj dve veljavni reÅ¡itvi.</div>}
-        </> : <div className="noRes2">Ni veljavne reÅ¡itve za te zahteve.</div>}
+            <div className={pref.converged?"conv on":"conv"}>{pref.converged?`konvergenca po ${pref.comparisons} primerjavah`:`${pref.comparisons} primerjav · signal ${pref.dominantSignal}`}</div>
+          </div> : <div className="soft2 none">Za A/B sta potrebni vsaj dve veljavni rešitvi.</div>}
+        </> : <div className="noRes2">Ni veljavne rešitve za te zahteve.</div>}
       </aside>
     </div>
    </div>);
@@ -371,8 +379,8 @@ function Door({p,W,D}){
   const hs=p.hinge?1:0;
   const Hx=sx+along[0]*lw*hs,     Hy=sy+along[1]*lw*hs;       // tecaj (fiksen)
   const Jx=sx+along[0]*lw*(1-hs), Jy=sy+along[1]*lw*(1-hs);   // zaprti podboj
-  const Tx=Hx+norm[0]*lw*sgn,     Ty=Hy+norm[1]*lw*sgn;       // odprto krilo (90Â°)
-  // sweep iz dejanskega kota: lok od T do J okoli H, krajsa pot (90Â°)
+  const Tx=Hx+norm[0]*lw*sgn,     Ty=Hy+norm[1]*lw*sgn;       // odprto krilo (90°)
+  // sweep iz dejanskega kota: lok od T do J okoli H, krajša pot (90°)
   const aT=Math.atan2(Ty-Hy,Tx-Hx), aJ=Math.atan2(Jy-Hy,Jx-Hx);
   let d=aJ-aT; while(d<=-Math.PI)d+=2*Math.PI; while(d>Math.PI)d-=2*Math.PI;
   const sweep=d>0?1:0;
@@ -392,7 +400,7 @@ function Door({p,W,D}){
 
 /* ===================== mali gradniki ===================== */
 function ZNum({label,v,set,max}){ return <label className="znum"><span>{label}</span><input type="range" min="0" max={max} step="50" value={v} onChange={e=>set(+e.target.value)}/><b className="mono">{v}</b></label>; }
-function Num({label,v,set,min,max,step,c}){ return <div className="num"><div className="fhd"><span>{label}</span><span className="mono" style={c?{color:c}:{}}>{v}{label.match(/Sirina|Globina|Jedro|Halo/)?" mm":""}</span></div><input type="range" min={min} max={max} step={step} value={v} onChange={e=>set(+e.target.value)} style={c?{accentColor:c}:{}}/></div>; }
+function Num({label,v,set,min,max,step,c}){ return <div className="num"><div className="fhd"><span>{label}</span><span className="mono" style={c?{color:c}:{}}>{v}{label.match(/Širina|Globina|Jedro|Halo/)?" mm":""}</span></div><input type="range" min={min} max={max} step={step} value={v} onChange={e=>set(+e.target.value)} style={c?{accentColor:c}:{}}/></div>; }
 
 const CSS=`
 .app{--bg:#0f1419;--panel:#161c23;--p2:#1b222b;--bd:#252e39;--tx:#d7dee6;--mut:#7c8794;--cy:#16b3b3;

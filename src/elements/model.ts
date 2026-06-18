@@ -34,7 +34,7 @@ export const CONNECTION_META: Record<ConnectionType, { name: string; short: stri
   'water-in': { name: 'Dotok vode', short: 'DV', color: '#3f86c9' },
   'water-out': { name: 'Odvod vode', short: 'OV', color: '#16b3b3' },
   electric: { name: 'Elektrika', short: 'EL', color: '#d9a23b' },
-  vent: { name: 'Prezracevanje', short: 'PR', color: '#9a86d0' },
+  vent: { name: 'Prezračevanje', short: 'PR', color: '#9a86d0' },
 };
 
 export const SIDE_LABELS: Record<Side, string> = {
@@ -65,12 +65,12 @@ export function orientation(element: Element): OrientationResult {
     (a === 'right' && b === 'left');
 
   if (sides.length === 0) {
-    return { txt: 'Ni priklopa na zid -> prost element (otok).', warn: false, corner: false };
+    return { txt: 'Ni priklopa na zid → prost element (otok).', warn: false, corner: false };
   }
 
   if (sides.length === 1) {
     return {
-      txt: `Servisna stran ${SIDE_LABELS[sides[0]]} -> ob zidu, 4 orientacije.`,
+      txt: `Servisna stran ${SIDE_LABELS[sides[0]]} → ob zidu, 4 orientacije.`,
       warn: false,
       corner: false,
     };
@@ -78,13 +78,13 @@ export function orientation(element: Element): OrientationResult {
 
   if (sides.length === 2) {
     return isOpposite(sides[0], sides[1])
-      ? { txt: 'Priklopa na NASPROTNIH straneh -> fizicno nemogoce.', warn: true, corner: false }
+      ? { txt: 'Priklopa na NASPROTNIH straneh → fizično nemogoče.', warn: true, corner: false }
       : {
-          txt: `Servisni strani ${SIDE_LABELS[sides[0]]}+${SIDE_LABELS[sides[1]]} -> v VOGAL, 4 vogali.`,
+          txt: `Servisni strani ${SIDE_LABELS[sides[0]]}+${SIDE_LABELS[sides[1]]} → v VOGAL, 4 vogali.`,
           warn: false,
           corner: true,
         };
   }
 
-  return { txt: 'Vec priklopov na zid -> najbrz neizvedljivo.', warn: true, corner: false };
+  return { txt: 'Več priklopov na zid → najbrž neizvedljivo.', warn: true, corner: false };
 }
