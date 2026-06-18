@@ -19,42 +19,99 @@ import { loadJson, saveJson } from "./shared/storage";
    O5 instalacije · O9 indukcija pravil
    ========================================================================= */
 
-/* ===================== APP - harmonika ===================== */
+/* =========================================================================
+   DVA OBJEKTIVA na isti engine (Nadgradnja 4.0):
+   · Workflow (uporabniški) — faza 0 šolanje + korak 1 elementi + korak 2
+     omejitve + korak 3 generiranje/izbiranje
+   · Orehe (razvojni/testni) — harmonika O1·O2·O5·O9 (testna miza)
+   ========================================================================= */
 export default function App(){
   const [library,setLibrary]=usePersistentState("floorplanner.library",baseLib);
-  const [open,setOpen]=useState("O2");
+  const [lens,setLens]=usePersistentState("floorplanner.lens","workflow");
   useEffect(()=>setLibrary(L=>normalizeLibraryText(L)),[setLibrary]);
+  return (
+    <div className="app">
+      <style>{CSS}</style>
+      <div className="appHd">
+        <span className="brand">◫ Layout Engine</span>
+        <div className="lensTabs">
+          <button className={lens==="workflow"?"on":""} onClick={()=>setLens("workflow")}>Workflow</button>
+          <button className={lens==="orehe"?"on":""} onClick={()=>setLens("orehe")}>Orehe · testna miza</button>
+        </div>
+      </div>
+      {lens==="workflow"
+        ? <Workflow library={library} setLibrary={setLibrary}/>
+        : <Orehe library={library} setLibrary={setLibrary}/>}
+    </div>
+  );
+}
+
+/* ===================== WORKFLOW (uporabniški pogled) ===================== */
+function Workflow({library,setLibrary}){
+  const [phase,setPhase]=usePersistentState("floorplanner.phase","korak2");
+  const rp=useRoomProject(library);
+  const phases=[
+    {id:"faza0",tag:"0",title:"Šolanje",sub:"indukcija — napolni lečo znanja (občasno)"},
+    {id:"korak1",tag:"1",title:"Elementi",sub:"knjižnica — priklopi, dimenzije, uporaba"},
+    {id:"korak2",tag:"2",title:"Omejitve sobe",sub:"velikost, vrata, cone, fiksni elementi"},
+    {id:"korak3",tag:"3",title:"Generiranje in izbiranje",sub:"variacije + A/B aktivno učenje"},
+  ];
+  return <div className="wf">
+    <div className="phaseNav">
+      {phases.map(p=>(
+        <button key={p.id} className={"phaseBtn "+(phase===p.id?"on":"")+(p.id==="faza0"?" sep":"")} onClick={()=>setPhase(p.id)}>
+          <span className="phaseTag">{p.tag}</span>
+          <span className="phaseTtl"><b>{p.title}</b><i>{p.sub}</i></span>
+        </button>
+      ))}
+    </div>
+    {phase==="faza0" && <div className="phaseBody"><div className="phaseLead">Faza 0 — šolanje: vržeš noter primere dobre prakse, sistem izlušči znanje (envelope, prior kanalov). Zgodi se enkrat/občasno, ne pri vsakem projektu.</div><O9 library={library} setLibrary={setLibrary}/></div>}
+    {phase==="korak1" && <div className="phaseBody"><O1 library={library} setLibrary={setLibrary}/></div>}
+    {phase==="korak2" && <div className="phaseBody">
+      <div className="phaseLead">Korak 2 — omejitve sobe: »tako je«. Velikost, vrata, prepovedane cone, fiksni elementi. Ta nabor je vmesnik, ki ga kasneje napolni engine za razporeditev sob.</div>
+      <div className="grid2c">
+        <ConstraintsPanel rp={rp} library={library}/>
+        <StagePanel rp={rp} library={library}/>
+      </div>
+      <div className="phaseCta"><button className="ctaNext" onClick={()=>setPhase("korak3")}>Naprej → generiranje in izbiranje</button></div>
+    </div>}
+    {phase==="korak3" && <div className="phaseBody">
+      <div className="phaseLead">Korak 3 — generiranje in izbiranje: engine vrže variacije, ti izbiraš boljše. A/B par izbere aktivno učenje (»Ugani kdo«) po informacijskem donosu.</div>
+      <div className="grid2c wide">
+        <StagePanel rp={rp} library={library}/>
+        <ReviewPanel rp={rp}/>
+      </div>
+    </div>}
+  </div>;
+}
+
+/* ===================== OREHE (razvojni/testni pogled) ===================== */
+function Orehe({library,setLibrary}){
+  const [open,setOpen]=useState("O2");
   const steps=[
     {id:"O1",title:"Model elementa",sub:"priklopi določajo orientacijo · clearance kot spekter",status:"deluje"},
     {id:"O2",title:"Postavitev v sobo",sub:"trda jedra se ne prekrivajo · halo se sme (s kaznijo)",status:"deluje"},
     {id:"O5",title:"Instalacije / routing",sub:"trase od priklopov do mokrega zidu · stene/tla",status:"deluje"},
     {id:"O9",title:"Indukcija pravil",sub:"strukturirane reference → Envelope pravila",status:"deluje"},
   ];
-  return (
-    <div className="app">
-      <style>{CSS}</style>
-      <div className="appHd">
-        <span className="brand">◫ Layout Engine</span>
-        <span className="bcrumb mono">oreh 1 · postavitev opreme v sobo</span>
-      </div>
-      {steps.map(s=>(
-        <section key={s.id} className={"step "+(open===s.id?"open":"")}>
-          <button className="stepHd" onClick={()=>setOpen(open===s.id?"":s.id)}>
-            <span className="stepTag">{s.id}</span>
-            <span className="stepTtl"><b>{s.title}</b><i>{s.sub}</i></span>
-            <span className={"stepStatus "+(s.status==="deluje"?"ok":"soon")}>{s.status}</span>
-            <span className="chev">{open===s.id?"▾":"▸"}</span>
-          </button>
-          {open===s.id && <div className="stepBody">
-            {s.id==="O1" && <O1 library={library} setLibrary={setLibrary}/>}
-            {s.id==="O2" && <O2 library={library}/>}
-            {s.id==="O5" && <Soon id={s.id}/>}
-            {s.id==="O9" && <O9 library={library} setLibrary={setLibrary}/>}
-          </div>}
-        </section>
-      ))}
-    </div>
-  );
+  return <>
+    {steps.map(s=>(
+      <section key={s.id} className={"step "+(open===s.id?"open":"")}>
+        <button className="stepHd" onClick={()=>setOpen(open===s.id?"":s.id)}>
+          <span className="stepTag">{s.id}</span>
+          <span className="stepTtl"><b>{s.title}</b><i>{s.sub}</i></span>
+          <span className={"stepStatus "+(s.status==="deluje"?"ok":"soon")}>{s.status}</span>
+          <span className="chev">{open===s.id?"▾":"▸"}</span>
+        </button>
+        {open===s.id && <div className="stepBody">
+          {s.id==="O1" && <O1 library={library} setLibrary={setLibrary}/>}
+          {s.id==="O2" && <O2 library={library}/>}
+          {s.id==="O5" && <Soon id={s.id}/>}
+          {s.id==="O9" && <O9 library={library} setLibrary={setLibrary}/>}
+        </div>}
+      </section>
+    ))}
+  </>;
 }
 
 function normalizeLibraryText(library){
@@ -249,8 +306,8 @@ function O1({library,setLibrary}){
    </div>);
 }
 
-/* ===================== O2 - postavitev ===================== */
-function O2({library}){
+/* ===================== O2 — projekt sobe (skupno stanje) ===================== */
+function useRoomProject(library){
   const [W,setW]=usePersistentState("floorplanner.project.W",1900),[D,setD]=usePersistentState("floorplanner.project.D",2200),[wet,setWet]=usePersistentState("floorplanner.project.wetWall","S");
   const [prog,setProg]=usePersistentState("floorplanner.project.program",()=>[{id:uid(),key:"door",w:800,dir:"auto",wall:"auto",hinge:"auto"},{id:uid(),key:"toilet"},{id:uid(),key:"sink"}]);
   const [soft,setSoft]=usePersistentState("floorplanner.project.soft",true);
@@ -288,117 +345,144 @@ function O2({library}){
   });
   const setChannel=(id,patch)=>setChannels(C=>C.map(c=>c.id===id?{...c,...patch}:c));
   const setInst=(id,patch)=>setProg(P=>P.map(p=>p.id===id?{...p,...patch}:p));
+  return {W,setW,D,setD,wet,setWet,prog,setProg,setInst,soft,setSoft,allowFloorRoutes,setAllowFloorRoutes,zones,setZones,setZone,
+    pool,idx,setIdx,seed,setSeed,pref,channels,setChannel,cfg,feasibility,cornerEls,hasDoor,best,explore,setExplore,
+    abPair,optionA,optionB,bestChannelScores,routing,choosePreference};
+}
+
+// O2 v pogledu orehov (testna miza): vse troje hkrati, kot prej.
+function O2({library}){
+  const rp=useRoomProject(library);
+  return <div className="o2"><div className="grid3">
+    <ConstraintsPanel rp={rp} library={library}/>
+    <StagePanel rp={rp} library={library}/>
+    <ReviewPanel rp={rp}/>
+  </div></div>;
+}
+
+/* ===== Korak 2 — omejitve sobe (leva polovica nekdanjega O2) ===== */
+function ConstraintsPanel({rp,library}){
+  const {W,setW,D,setD,wet,setWet,prog,setProg,setInst,soft,setSoft,allowFloorRoutes,setAllowFloorRoutes,zones,setZones,setZone,hasDoor,cornerEls,feasibility,setSeed}=rp;
   return (
-   <div className="o2">
-    <div className="grid3">
-      <aside className="col">
-        <div className="eyebrow">Prostor</div>
-        <Num label="Širina" v={W} set={setW} min={1200} max={5000} step={50}/>
-        <Num label="Globina" v={D} set={setD} min={1400} max={5000} step={50}/>
-        <div className="wp"><span>Mokri zid</span><div className="rt wgrid">{["N","E","S","W"].map(w=><button key={w} className={wet===w?"on":""} onClick={()=>setWet(w)}>{({N:"sever",E:"vzhod",S:"jug",W:"zahod"})[w]}</button>)}</div></div>
-        <div className="eyebrow mt">Program</div>
-        <div className="addRow">{Object.entries(library).map(([k,e])=><button key={k} onClick={()=>setProg(p=>[...p,{id:uid(),key:k,...(isDoor(e)?{w:800,dir:"auto",wall:"auto",hinge:"auto"}:{})}])}>+ {e.name}</button>)}</div>
-        <div className="progList">{prog.map(p=>{const e=library[p.key];const door=isDoor(e);
-          return <div key={p.id} className={"pItem "+(door?"door":"")}>
-            <div className="pTop"><span>{e.name}{door?` (${p.w})`:""}</span><button onClick={()=>setProg(P=>P.filter(x=>x.id!==p.id))}>×</button></div>
-            {door && <div className="dCfg">
-              <div className="dRow"><span>širina</span><div className="rt3">{[700,800,900].map(w=><button key={w} className={p.w===w?"on":""} onClick={()=>setInst(p.id,{w})}>{w}</button>)}</div></div>
-              <div className="dRow"><span>smer</span><div className="rt3">{[["auto","auto"],["inward","Noter"],["outward","Ven"]].map(([v,l])=><button key={v} className={p.dir===v?"on":""} onClick={()=>setInst(p.id,{dir:v})}>{l}</button>)}</div></div>
-              <div className="dRow"><span>tečaj</span><div className="rt3">{[["auto","auto"],[0,"Levo"],[1,"Desno"]].map(([v,l])=><button key={String(v)} className={p.hinge===v?"on":""} onClick={()=>setInst(p.id,{hinge:v})}>{l}</button>)}</div></div>
-              <div className="dRow"><span>zid</span><div className="rt3 wrap">{[["auto","auto"],["N","S"],["E","V"],["S","J"],["W","Z"]].map(([v,l])=><button key={v} className={p.wall===v?"on":""} onClick={()=>setInst(p.id,{wall:v})}>{l}</button>)}</div></div>
-              <div className="dRow"><span>poz.</span><div className="rt3"><button className={p.fixedPos?"on":""} onClick={()=>setInst(p.id,{fixedPos:!p.fixedPos})}>{p.fixedPos?"fiksna":"prosta"}</button></div></div>
-              {p.fixedPos && <input type="range" min="0" max="1" step="0.02" value={p.fpos??0.5} onChange={e=>setInst(p.id,{fpos:+e.target.value})} style={{width:"100%",marginTop:2,accentColor:"#5aa9e6"}}/>}
-            </div>}
-          </div>;})}</div>
-        {!hasDoor && <div className="warnNote">⚠ Soba rabi vsaj ena vrata. Dodaj jih, sicer ni veljavne rešitve.</div>}
-        {cornerEls.length>0 && <div className="warnNote">Kotni elementi rabijo vogalno postavitev - pride kasneje.</div>}
-        {!feasibility.feasible && <div className="warnNote"><b>Predhodna izvedljivost</b><br/>{feasibility.reasons.map((r,i)=><span key={i}>{r}<br/></span>)}</div>}
-        <div className="eyebrow mt">Realne omejitve sobe</div>
-        <button className="add" onClick={()=>setZones(z=>[...z,{id:uid(),x:Math.round(W*0.4),y:Math.round(D*0.35),w:600,h:600}])}>+ prepovedana cona</button>
-        {zones.map(z=>(
-          <div key={z.id} className="zone">
-            <div className="zTop"><span>prepovedana cona</span><button onClick={()=>setZones(Z=>Z.filter(x=>x.id!==z.id))}>×</button></div>
-            <div className="zGrid">
-              <ZNum label="x" v={z.x} set={v=>setZone(z.id,{x:v})} max={W}/>
-              <ZNum label="y" v={z.y} set={v=>setZone(z.id,{y:v})} max={D}/>
-              <ZNum label="š" v={z.w} set={v=>setZone(z.id,{w:v})} max={W}/>
-              <ZNum label="g" v={z.h} set={v=>setZone(z.id,{h:v})} max={D}/>
-            </div>
+    <aside className="col">
+      <div className="eyebrow">Prostor</div>
+      <Num label="Širina" v={W} set={setW} min={1200} max={5000} step={50}/>
+      <Num label="Globina" v={D} set={setD} min={1400} max={5000} step={50}/>
+      <div className="wp"><span>Mokri zid</span><div className="rt wgrid">{["N","E","S","W"].map(w=><button key={w} className={wet===w?"on":""} onClick={()=>setWet(w)}>{({N:"sever",E:"vzhod",S:"jug",W:"zahod"})[w]}</button>)}</div></div>
+      <div className="eyebrow mt">Program</div>
+      <div className="addRow">{Object.entries(library).map(([k,e])=><button key={k} onClick={()=>setProg(p=>[...p,{id:uid(),key:k,...(isDoor(e)?{w:800,dir:"auto",wall:"auto",hinge:"auto"}:{})}])}>+ {e.name}</button>)}</div>
+      <div className="progList">{prog.map(p=>{const e=library[p.key];const door=isDoor(e);
+        return <div key={p.id} className={"pItem "+(door?"door":"")}>
+          <div className="pTop"><span>{e.name}{door?` (${p.w})`:""}</span><button onClick={()=>setProg(P=>P.filter(x=>x.id!==p.id))}>×</button></div>
+          {door && <div className="dCfg">
+            <div className="dRow"><span>širina</span><div className="rt3">{[700,800,900].map(w=><button key={w} className={p.w===w?"on":""} onClick={()=>setInst(p.id,{w})}>{w}</button>)}</div></div>
+            <div className="dRow"><span>smer</span><div className="rt3">{[["auto","auto"],["inward","Noter"],["outward","Ven"]].map(([v,l])=><button key={v} className={p.dir===v?"on":""} onClick={()=>setInst(p.id,{dir:v})}>{l}</button>)}</div></div>
+            <div className="dRow"><span>tečaj</span><div className="rt3">{[["auto","auto"],[0,"Levo"],[1,"Desno"]].map(([v,l])=><button key={String(v)} className={p.hinge===v?"on":""} onClick={()=>setInst(p.id,{hinge:v})}>{l}</button>)}</div></div>
+            <div className="dRow"><span>zid</span><div className="rt3 wrap">{[["auto","auto"],["N","S"],["E","V"],["S","J"],["W","Z"]].map(([v,l])=><button key={v} className={p.wall===v?"on":""} onClick={()=>setInst(p.id,{wall:v})}>{l}</button>)}</div></div>
+            <div className="dRow"><span>poz.</span><div className="rt3"><button className={p.fixedPos?"on":""} onClick={()=>setInst(p.id,{fixedPos:!p.fixedPos})}>{p.fixedPos?"fiksna":"prosta"}</button></div></div>
+            {p.fixedPos && <input type="range" min="0" max="1" step="0.02" value={p.fpos??0.5} onChange={e=>setInst(p.id,{fpos:+e.target.value})} style={{width:"100%",marginTop:2,accentColor:"#5aa9e6"}}/>}
+          </div>}
+        </div>;})}</div>
+      {!hasDoor && <div className="warnNote">⚠ Soba rabi vsaj ena vrata. Dodaj jih, sicer ni veljavne rešitve.</div>}
+      {cornerEls.length>0 && <div className="warnNote">Kotni elementi rabijo vogalno postavitev - pride kasneje.</div>}
+      {!feasibility.feasible && <div className="warnNote"><b>Predhodna izvedljivost</b><br/>{feasibility.reasons.map((r,i)=><span key={i}>{r}<br/></span>)}</div>}
+      <div className="eyebrow mt">Realne omejitve sobe</div>
+      <button className="add" onClick={()=>setZones(z=>[...z,{id:uid(),x:Math.round(W*0.4),y:Math.round(D*0.35),w:600,h:600}])}>+ prepovedana cona</button>
+      {zones.map(z=>(
+        <div key={z.id} className="zone">
+          <div className="zTop"><span>prepovedana cona</span><button onClick={()=>setZones(Z=>Z.filter(x=>x.id!==z.id))}>×</button></div>
+          <div className="zGrid">
+            <ZNum label="x" v={z.x} set={v=>setZone(z.id,{x:v})} max={W}/>
+            <ZNum label="y" v={z.y} set={v=>setZone(z.id,{y:v})} max={D}/>
+            <ZNum label="š" v={z.w} set={v=>setZone(z.id,{w:v})} max={W}/>
+            <ZNum label="g" v={z.h} set={v=>setZone(z.id,{h:v})} max={D}/>
           </div>
-        ))}
-        <div className="ifaceNote">Vmesnik omejitev: zdaj jih vnašaš ti (steber, okno, obstoječa vrata). Kasneje jih engine za razporeditev sob napolni sam - kje so vrata, koliko m².</div>
-        <label className="softTgl"><input type="checkbox" checked={soft} onChange={e=>setSoft(e.target.checked)}/> <span>Mehka pravila: halo se sme upogniti</span></label>
-        <div className="softNote">{soft?"Halo se sme prekriti (kazen). Lok vrat ostane TRDO pravilo - vanj nikoli.":"Strogo: vsako prekrivanje halo = zavrnitev."}</div>
-        <label className="softTgl"><input type="checkbox" checked={allowFloorRoutes} onChange={e=>setAllowFloorRoutes(e.target.checked)}/> <span>O5: talne trase dovoljene</span></label>
-        <div className="softNote">{allowFloorRoutes?"Priklopi, ki vodijo v tla, se lahko trasirajo po plošči.":"Talne trase ostanejo vidne, vendar so označene kot blokirane."}</div>
-        <button className="regen" onClick={()=>setSeed(s=>s+1)}>↻ Generiraj</button>
-      </aside>
+        </div>
+      ))}
+      <div className="ifaceNote">Vmesnik omejitev: zdaj jih vnašaš ti (steber, okno, obstoječa vrata). Kasneje jih engine za razporeditev sob napolni sam - kje so vrata, koliko m².</div>
+      <label className="softTgl"><input type="checkbox" checked={soft} onChange={e=>setSoft(e.target.checked)}/> <span>Mehka pravila: halo se sme upogniti</span></label>
+      <div className="softNote">{soft?"Halo se sme prekriti (kazen). Lok vrat ostane TRDO pravilo - vanj nikoli.":"Strogo: vsako prekrivanje halo = zavrnitev."}</div>
+      <label className="softTgl"><input type="checkbox" checked={allowFloorRoutes} onChange={e=>setAllowFloorRoutes(e.target.checked)}/> <span>O5: talne trase dovoljene</span></label>
+      <div className="softNote">{allowFloorRoutes?"Priklopi, ki vodijo v tla, se lahko trasirajo po plošči.":"Talne trase ostanejo vidne, vendar so označene kot blokirane."}</div>
+      <button className="regen" onClick={()=>setSeed(s=>s+1)}>↻ Generiraj</button>
+    </aside>
+  );
+}
 
-      <main className="cstage">
-        <div className="legend mono"><span><i style={{background:"#2b3138"}}/>oprema</span><span><i style={{background:"#e2553f"}}/>jedro</span><span><i style={{background:"#d9a23b",opacity:.5}}/>halo</span><span><i style={{background:"#c0392b"}}/>halo prekrit</span><span><i style={{background:"#5aa9e6"}}/>lok vrat</span><span><i style={{background:"#16b3b3"}}/>mokri zid</span><span><i style={{background:"#3f86c9"}}/>O5 zid</span><span><i style={{background:"#d9a23b"}}/>O5 tla</span></div>
-        <div className="sheet">{best? <O2Plan cand={best} cfg={cfg} zones={zones} routing={routing}/> : <div className="noRes">{!feasibility.feasible?<>Brief ni izvedljiv:<br/>{feasibility.reasons.join(" · ")}</>:!hasDoor?"Dodaj vrata - soba brez vrat nima veljavne rešitve.":soft?"Ni veljavne razporeditve ob teh omejitvah. Povečaj prostor ali zrahljaj zahteve.":"V strogem načinu ni rešitve - vklopi mehka pravila."}</div>}</div>
-        <div className="poolBar">{pool.length>0 && <><span className="mono">{pool.length} veljavnih</span>{pool.slice(0,8).map((c,i)=><button key={i} className={"thumb "+(idx===i?"on":"")} onClick={()=>setIdx(i)}><span className="mono">{(c.ev.score*100|0)}</span></button>)}</>}</div>
-      </main>
+/* ===== Korak 3 (a) — oder z razporeditvijo in poolom ===== */
+function StagePanel({rp}){
+  const {best,cfg,zones,routing,feasibility,hasDoor,soft,pool,idx,setIdx}=rp;
+  return (
+    <main className="cstage">
+      <div className="legend mono"><span><i style={{background:"#2b3138"}}/>oprema</span><span><i style={{background:"#e2553f"}}/>jedro</span><span><i style={{background:"#d9a23b",opacity:.5}}/>halo</span><span><i style={{background:"#c0392b"}}/>halo prekrit</span><span><i style={{background:"#5aa9e6"}}/>lok vrat</span><span><i style={{background:"#16b3b3"}}/>mokri zid</span><span><i style={{background:"#3f86c9"}}/>O5 zid</span><span><i style={{background:"#d9a23b"}}/>O5 tla</span></div>
+      <div className="sheet">{best? <O2Plan cand={best} cfg={cfg} zones={zones} routing={routing}/> : <div className="noRes">{!feasibility.feasible?<>Brief ni izvedljiv:<br/>{feasibility.reasons.join(" · ")}</>:!hasDoor?"Dodaj vrata - soba brez vrat nima veljavne rešitve.":soft?"Ni veljavne razporeditve ob teh omejitvah. Povečaj prostor ali zrahljaj zahteve.":"V strogem načinu ni rešitve - vklopi mehka pravila."}</div>}</div>
+      <div className="poolBar">{pool.length>0 && <><span className="mono">{pool.length} veljavnih</span>{pool.slice(0,8).map((c,i)=><button key={i} className={"thumb "+(idx===i?"on":"")} onClick={()=>setIdx(i)}><span className="mono">{(c.ev.score*100|0)}</span></button>)}</>}</div>
+    </main>
+  );
+}
 
-      <aside className="col">
-        {best? <>
-          <div className="eyebrow">Preverba pravil · ocena <span className="mono">{(best.ev.score*100|0)}</span></div>
-          <div className="check ok2">✓ trda jedra se ne prekrivajo</div>
-          <div className="check ok2">✓ lok vrat prost (P-01)</div>
-          <div className="check ok2">✓ prehod {Math.round(best.ev.aisle)} mm ≥ {cfg.minAisle}</div>
-          <div className="eyebrow mt">Mehke kazni (halo)</div>
-          {best.ev.overlaps.length>0 ? best.ev.overlaps.map((o,i)=>(
-            <div key={i} className="soft2"><span className="sw"/>{o.a} ↔ {o.b}<br/><span className="mono">{(o.area/1e6).toFixed(2)} m² → dovoljeno, kaznovano</span></div>
-          )) : <div className="soft2 none">brez prekrivanj halo - čista razporeditev</div>}
-          <div className="eyebrow mt">Instalacije</div>
-          <div className="drain"><span className="mono">{((routing?.totalLength||0)/1000).toFixed(2)} m</span> skupne trase<br/><i>O5 računa od dejanske priklopne točke</i></div>
-          {routing?.blockedCount>0 && <div className="warnNote">{routing.blockedCount} talnih tras je blokiranih po politiki plošče.</div>}
-          {routing?.floorCrossingCount>0 && <div className="warnNote">{routing.floorCrossingCount} talnih tras ima križanje.</div>}
-          <div className="routeList">{routing?.routes.map(r=><div key={r.id} className={"routeItem "+r.via+(r.blocked?" blocked":"")}>
-            <span>{r.fixtureName} · {CONN[r.connection.type].short} · {r.via==="floor"?"tla":"zid"}</span>
-            <b className="mono">{(r.length/1000).toFixed(2)} m</b>
-          </div>)}</div>
-          <div className="eyebrow mt">A/B preference · aktivno učenje</div>
-          {optionA&&optionB ? <div className="abBox">
-            <div className="abBtns">
-              <button onClick={()=>choosePreference(optionA,optionB)}>A <span className="mono">{(optionA.ev.score*100|0)}</span></button>
-              <button onClick={()=>choosePreference(optionB,optionA)}>B <span className="mono">{(optionB.ev.score*100|0)}</span></button>
-            </div>
-            <div className="exploreRow">
-              <span>raziskovanje <b className="mono">{Math.round(explore*100)}</b> · izkoriščanje <b className="mono">{Math.round((1-explore)*100)}</b></span>
-              <input type="range" min="0" max="1" step="0.05" value={explore} onChange={e=>setExplore(+e.target.value)} style={{width:"100%",accentColor:"#5aa9e6"}}/>
-              <span className="abHint">{explore>0.66?"Ugani kdo: par, ki najbolj prepolovi negotovost":explore<0.34?"izkoriščanje: kaže najboljši par":"mešano: informativno + kvaliteta"} · donos para <b className="mono">{(abPair.info*100|0)}</b></span>
-              <button className="microBtn" onClick={()=>setExplore(suggestedExplore(pref.comparisons))}>predlagaj ({Math.round(suggestedExplore(pref.comparisons)*100)})</button>
-            </div>
-            <div className="prefBars">
-              <span>halo <b className="mono">{Math.round(pref.weights.halo*100)}</b></span>
-              <span>odtok <b className="mono">{Math.round(pref.weights.drain*100)}</b></span>
-            </div>
-            <div className="prefBars"><span>donos <b className="mono">{Math.round(measurePreferenceGain(pref)*100)}</b></span><span>stabilnost <b className="mono">{pref.stableStreak}</b></span></div>
-            <div className={pref.converged?"conv on":"conv"}>{pref.converged?`konvergenca po ${pref.comparisons} primerjavah`:`${pref.comparisons} primerjav · signal ${pref.dominantSignal}`}</div>
-          </div> : <div className="soft2 none">Za A/B sta potrebni vsaj dve veljavni rešitvi.</div>}
-          <div className="eyebrow mt">Testna miza kanalov</div>
-          <div className="channelBench">
-            {channels.map(ch=>{
-              const score=bestChannelScores?.scores.find(s=>s.channelId===ch.id);
-              return <div key={ch.id} className={"channelCard "+(!ch.enabled?"off":"")}>
-                <div className="chTop"><label><input type="checkbox" checked={ch.enabled} onChange={e=>setChannel(ch.id,{enabled:e.target.checked})}/> {ch.name}</label><span>{ch.family}</span></div>
-                <div className="chScope"><button className={ch.scope==="global"?"on":""} onClick={()=>setChannel(ch.id,{scope:"global"})}>global</button><button className={ch.scope==="room-type"?"on":""} onClick={()=>setChannel(ch.id,{scope:"room-type"})}>room</button></div>
-                <label className="chSlider">prior <input type="range" min="0" max="1" step="0.01" value={ch.prior} onChange={e=>setChannel(ch.id,{prior:+e.target.value})}/><b className="mono">{Math.round(ch.prior*100)}</b></label>
-                <label className="chSlider">zaup. <input type="range" min="0" max="1" step="0.01" value={ch.confidence} onChange={e=>setChannel(ch.id,{confidence:+e.target.value})}/><b className="mono">{Math.round(ch.confidence*100)}</b></label>
-                <div className="chBars">
-                  <span style={{"--w":`${ch.prior*100}%`}}>prior</span>
-                  <span style={{"--w":`${ch.learned*100}%`}}>learned</span>
-                  <span style={{"--w":`${effectiveWeight(ch)*100}%`}}>eff</span>
-                </div>
-                <div className="chScore">score <b className="mono">{score?Math.round(score.value*100):"-"}</b></div>
+/* ===== Korak 3 (b) — preverba, instalacije, A/B aktivno učenje, kanali ===== */
+function ReviewPanel({rp}){
+  const {best,cfg,routing,optionA,optionB,abPair,explore,setExplore,pref,channels,setChannel,bestChannelScores,choosePreference}=rp;
+  return (
+    <aside className="col">
+      {best? <>
+        <div className="eyebrow">Preverba pravil · ocena <span className="mono">{(best.ev.score*100|0)}</span></div>
+        <div className="check ok2">✓ trda jedra se ne prekrivajo</div>
+        <div className="check ok2">✓ lok vrat prost (P-01)</div>
+        <div className="check ok2">✓ prehod {Math.round(best.ev.aisle)} mm ≥ {cfg.minAisle}</div>
+        <div className="eyebrow mt">Mehke kazni (halo)</div>
+        {best.ev.overlaps.length>0 ? best.ev.overlaps.map((o,i)=>(
+          <div key={i} className="soft2"><span className="sw"/>{o.a} ↔ {o.b}<br/><span className="mono">{(o.area/1e6).toFixed(2)} m² → dovoljeno, kaznovano</span></div>
+        )) : <div className="soft2 none">brez prekrivanj halo - čista razporeditev</div>}
+        <div className="eyebrow mt">Instalacije</div>
+        <div className="drain"><span className="mono">{((routing?.totalLength||0)/1000).toFixed(2)} m</span> skupne trase<br/><i>O5 računa od dejanske priklopne točke</i></div>
+        {routing?.blockedCount>0 && <div className="warnNote">{routing.blockedCount} talnih tras je blokiranih po politiki plošče.</div>}
+        {routing?.floorCrossingCount>0 && <div className="warnNote">{routing.floorCrossingCount} talnih tras ima križanje.</div>}
+        <div className="routeList">{routing?.routes.map(r=><div key={r.id} className={"routeItem "+r.via+(r.blocked?" blocked":"")}>
+          <span>{r.fixtureName} · {CONN[r.connection.type].short} · {r.via==="floor"?"tla":"zid"}</span>
+          <b className="mono">{(r.length/1000).toFixed(2)} m</b>
+        </div>)}</div>
+        <div className="eyebrow mt">A/B preference · aktivno učenje</div>
+        {optionA&&optionB ? <div className="abBox">
+          <div className="abBtns">
+            <button onClick={()=>choosePreference(optionA,optionB)}>A <span className="mono">{(optionA.ev.score*100|0)}</span></button>
+            <button onClick={()=>choosePreference(optionB,optionA)}>B <span className="mono">{(optionB.ev.score*100|0)}</span></button>
+          </div>
+          <div className="exploreRow">
+            <span>raziskovanje <b className="mono">{Math.round(explore*100)}</b> · izkoriščanje <b className="mono">{Math.round((1-explore)*100)}</b></span>
+            <input type="range" min="0" max="1" step="0.05" value={explore} onChange={e=>setExplore(+e.target.value)} style={{width:"100%",accentColor:"#5aa9e6"}}/>
+            <span className="abHint">{explore>0.66?"Ugani kdo: par, ki najbolj prepolovi negotovost":explore<0.34?"izkoriščanje: kaže najboljši par":"mešano: informativno + kvaliteta"} · donos para <b className="mono">{(abPair.info*100|0)}</b></span>
+            <button className="microBtn" onClick={()=>setExplore(suggestedExplore(pref.comparisons))}>predlagaj ({Math.round(suggestedExplore(pref.comparisons)*100)})</button>
+          </div>
+          <div className="prefBars">
+            <span>halo <b className="mono">{Math.round(pref.weights.halo*100)}</b></span>
+            <span>odtok <b className="mono">{Math.round(pref.weights.drain*100)}</b></span>
+          </div>
+          <div className="prefBars"><span>donos <b className="mono">{Math.round(measurePreferenceGain(pref)*100)}</b></span><span>stabilnost <b className="mono">{pref.stableStreak}</b></span></div>
+          <div className={pref.converged?"conv on":"conv"}>{pref.converged?`konvergenca po ${pref.comparisons} primerjavah`:`${pref.comparisons} primerjav · signal ${pref.dominantSignal}`}</div>
+        </div> : <div className="soft2 none">Za A/B sta potrebni vsaj dve veljavni rešitvi.</div>}
+        <div className="eyebrow mt">Testna miza kanalov</div>
+        <div className="channelBench">
+          {channels.map(ch=>{
+            const score=bestChannelScores?.scores.find(s=>s.channelId===ch.id);
+            return <div key={ch.id} className={"channelCard "+(!ch.enabled?"off":"")}>
+              <div className="chTop"><label><input type="checkbox" checked={ch.enabled} onChange={e=>setChannel(ch.id,{enabled:e.target.checked})}/> {ch.name}</label><span>{ch.family}</span></div>
+              <div className="chScope"><button className={ch.scope==="global"?"on":""} onClick={()=>setChannel(ch.id,{scope:"global"})}>global</button><button className={ch.scope==="room-type"?"on":""} onClick={()=>setChannel(ch.id,{scope:"room-type"})}>room</button></div>
+              <label className="chSlider">prior <input type="range" min="0" max="1" step="0.01" value={ch.prior} onChange={e=>setChannel(ch.id,{prior:+e.target.value})}/><b className="mono">{Math.round(ch.prior*100)}</b></label>
+              <label className="chSlider">zaup. <input type="range" min="0" max="1" step="0.01" value={ch.confidence} onChange={e=>setChannel(ch.id,{confidence:+e.target.value})}/><b className="mono">{Math.round(ch.confidence*100)}</b></label>
+              <div className="chBars">
+                <span style={{"--w":`${ch.prior*100}%`}}>prior</span>
+                <span style={{"--w":`${ch.learned*100}%`}}>learned</span>
+                <span style={{"--w":`${effectiveWeight(ch)*100}%`}}>eff</span>
               </div>
-            })}
-          </div>
-        </> : <div className="noRes2">Ni veljavne rešitve za te zahteve.</div>}
-      </aside>
-    </div>
-   </div>);
+              <div className="chScore">score <b className="mono">{score?Math.round(score.value*100):"-"}</b></div>
+            </div>
+          })}
+        </div>
+      </> : <div className="noRes2">Ni veljavne rešitve za te zahteve.</div>}
+    </aside>
+  );
 }
 
 function O2Plan({cand,cfg,zones,routing}){ const {W,D,wetWall}=cfg; const PAD=900; const we=wallEdge(wetWall,W,D);
@@ -555,6 +639,26 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .envGrid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.envGrid span{background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:7px;font-size:10.5px;color:var(--mut)}.envGrid b{float:right;color:var(--cy)}
 .ruleMeta,.refs{font-size:10.5px;color:var(--mut);line-height:1.45;margin-top:9px}.refs{color:#7fb8e6}
 .libRule{background:var(--p2);border:1px solid var(--bd);border-radius:7px;padding:9px;margin-bottom:7px;display:flex;flex-direction:column;gap:4px}.libRule b{font-size:12px}.libRule span{color:var(--cy);font-size:11px}.libRule i{color:var(--mut);font-size:10px;font-style:normal}
+
+/* 4.0 — dva objektiva + faze workflowa */
+.lensTabs{display:flex;gap:4px;background:var(--p2);border:1px solid var(--bd);border-radius:9px;padding:3px}
+.lensTabs button{background:none;border:none;color:var(--mut);padding:6px 14px;border-radius:7px;font-size:12px;cursor:pointer}
+.lensTabs button.on{background:#0e2626;color:var(--cy)}
+.wf{display:flex;flex-direction:column;gap:10px}
+.phaseNav{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+@media(max-width:760px){.phaseNav{grid-template-columns:1fr 1fr}}
+.phaseBtn{display:flex;align-items:center;gap:10px;text-align:left;background:var(--panel);border:1px solid var(--bd);border-radius:11px;padding:11px 13px;cursor:pointer;color:var(--tx)}
+.phaseBtn.on{border-color:var(--cy);background:#0e1f1f}
+.phaseBtn.sep{border-style:dashed}
+.phaseTag{width:28px;height:28px;border:1.5px solid var(--cy);border-radius:8px;display:grid;place-items:center;color:var(--cy);font-weight:700;font-size:12px;flex:none}
+.phaseTtl{display:flex;flex-direction:column;gap:2px;min-width:0}.phaseTtl b{font-size:13px}.phaseTtl i{font-size:10.5px;color:var(--mut);font-style:normal;line-height:1.3}
+.phaseBody{background:var(--panel);border:1px solid var(--bd);border-radius:12px;overflow:hidden}
+.phaseLead{padding:14px 18px;font-size:12px;line-height:1.55;color:#9fb0bd;border-bottom:1px solid var(--bd);background:var(--p2)}
+.grid2c{display:grid;grid-template-columns:240px 1fr;gap:1px;background:var(--bd)}
+.grid2c.wide{grid-template-columns:1fr 290px}
+@media(max-width:1080px){.grid2c,.grid2c.wide{grid-template-columns:1fr}}
+.phaseCta{display:flex;justify-content:flex-end;padding:14px 18px;background:var(--panel)}
+.ctaNext{background:#0e2626;border:1px solid #1f4444;color:var(--cy);border-radius:8px;padding:9px 18px;font-size:12.5px;cursor:pointer}.ctaNext:hover{border-color:var(--cy)}
 `;
 
 
