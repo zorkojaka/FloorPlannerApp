@@ -565,6 +565,11 @@ function ABStagePanel({rp}){
   const recent=championEvents.slice(-5);
   const changes=recent.filter(e=>e.changed).length;
   const lastNew=championEvents.at(-1)?.changed;
+  const pairHints=[
+    ["izkoriščanje",abPairLabel({mode:"prvak vs izzivalka",a:best,b:pool.find(c=>best&&candidateKey(c)!==candidateKey(best))})],
+    ["vmes",abPair?.mode||"-"],
+    ["raziskovanje","največji informacijski donos"],
+  ];
   return <main className="cstage abStage">
     <div className="abProgress">
       <span>Primerjave <b className="mono">{pref.comparisons}</b></span>
@@ -573,6 +578,7 @@ function ABStagePanel({rp}){
       <label>raziskovanje <b className="mono">{Math.round(explore*100)}</b><input type="range" min="0" max="1" step="0.05" value={explore} onChange={e=>setExplore(+e.target.value)}/></label>
       <button className="microBtn" onClick={()=>setExplore(suggestedExplore(pref.comparisons))}>predlagaj</button>
     </div>
+    <div className="pairModeHints">{pairHints.map(([k,v])=><span key={k}><b>{k}</b>{v}</span>)}</div>
     <div className="bestStrip">
       <div className="abHead"><b>Trenutno najboljša {lastNew&&<em className="newChamp">nov prvak</em>}</b><span className="mono">{best?(best.ev.score*100|0):"-"}</span></div>
       <div className="bestMini">{best?<O2Plan cand={best} cfg={cfg} zones={zones} routing={routeOf(best)} paths={[]} bandMin={pathMin} bandWant={pathWant}/>:<div className="noRes">Ni veljavne rešitve.</div>}</div>
@@ -591,6 +597,11 @@ function ABStagePanel({rp}){
     </> : <div className="noRes">Za A/B sta potrebni vsaj dve veljavni razporeditvi.</div>}
     <div className="poolBar">{pool.length>0 && <><span className="mono">{pool.length} veljavnih</span>{pool.slice(0,8).map((c,i)=><button key={i} className={"thumb "+(idx===i?"on":"")} onClick={()=>setIdx(i)}><span className="mono">{(c.ev.score*100|0)}</span></button>)}</>}</div>
   </main>;
+}
+
+function abPairLabel(pair){
+  if(!pair?.a||!pair?.b)return "-";
+  return pair.mode||"par";
 }
 
 function ABPlanCard({label,badge,cand,cfg,zones,routing,pathMin,pathWant}){
@@ -1086,13 +1097,14 @@ const CSS=`
 .threeHost canvas{width:100%;height:100%;display:block}
 .abStage{gap:10px;padding-bottom:12px}.abProgress{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 16px;color:var(--mut);font-size:11px}
 .abProgress label{display:flex;align-items:center;gap:7px}.abProgress input{width:120px}.bestStrip{margin:0 16px;border:1px solid var(--bd);border-radius:8px;overflow:hidden;background:var(--panel)}
+.pairModeHints{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0 16px;color:var(--mut);font-size:10.5px}.pairModeHints span{border:1px solid var(--bd);border-radius:7px;padding:7px 8px;background:var(--panel)}.pairModeHints b{display:block;color:var(--tx);font-size:10px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:2px}
 .bestMini{height:210px;background:#f6f7f3}.bestMini svg{width:100%;height:100%}.abCompare{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 16px}
 .abPlanCard{min-width:0;background:var(--panel);border:1px solid var(--bd);border-radius:8px;overflow:hidden}.abHead{height:36px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 11px;font-size:12px;color:var(--tx);background:var(--panel);border-bottom:1px solid var(--bd)}
 .abHead .mono{font-size:10.5px;color:var(--mut);white-space:nowrap}.abSheet{height:360px;background:#f6f7f3}.abSheet svg{width:100%;height:100%}
 .newChamp,.champBadge,.challBadge{font-style:normal;font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;border-radius:5px;padding:3px 6px;margin-left:6px}
 .newChamp,.champBadge{background:#10302a;color:#5bbd8b;border:1px solid #285d4b}.challBadge{background:#2a1a10;color:#d9a23b;border:1px solid #5a4420}
 .abChoiceBtns{display:grid;grid-template-columns:1fr auto 1fr auto;gap:8px;margin:0 16px}.abChoiceBtns button{height:38px;border:1px solid var(--bd);border-radius:8px;background:var(--p2);color:var(--tx);cursor:pointer;padding:0 12px}.abChoiceBtns button:hover{border-color:var(--cy)}.abChoiceBtns .champStay{border-color:#285d4b;color:#5bbd8b;background:#10241f}
-@media(max-width:980px){.abCompare{grid-template-columns:1fr}.abSheet{height:300px}.abChoiceBtns{grid-template-columns:1fr}}
+@media(max-width:980px){.abCompare,.pairModeHints{grid-template-columns:1fr}.abSheet{height:300px}.abChoiceBtns{grid-template-columns:1fr}}
 .noRes,.noRes2{color:var(--mut);font-size:13px;padding:30px;text-align:center;line-height:1.6}.noRes2{padding:14px}
 .num{margin-bottom:12px}.fhd{display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:6px}.fhd .mono{color:var(--cy)}
 input[type=range]{width:100%;accent-color:var(--cy);height:4px}
