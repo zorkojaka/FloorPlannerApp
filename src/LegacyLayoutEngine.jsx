@@ -8,6 +8,7 @@ import { checkFeasibility } from "./engine/feasibility";
 import { initialPreferenceState, rankByPreference, recordPreference } from "./engine/preference";
 import { nextPair, suggestedExplore } from "./engine/active";
 import { buildFreeGrid, findPath } from "./engine/freespace";
+import { buildElevation } from "./engine/elevation";
 import { elementBox } from "./engine/volume";
 import { doorInteriorPoint, usagePoint } from "./engine/evaluator";
 import { measureGeneralization, measureInductionHoldout, measurePreferenceGain } from "./engine/metrics";
@@ -449,10 +450,25 @@ function ConstraintsPanel({rp,library}){
 /* ===== Korak 3 (a) — oder z razporeditvijo in poolom ===== */
 function StagePanel({rp}){
   const {best,cfg,zones,routing,feasibility,hasDoor,soft,pool,idx,setIdx,paths,showPaths,pathMin,pathWant}=rp;
+  const [view,setView]=usePersistentState("floorplanner.stageView","plan");
+  const wallView=view==="plan"?null:view;
+  const viewButtons=[
+    ["plan","Tloris"],
+    ["N","Naris S"],
+    ["E","Naris V"],
+    ["S","Naris J"],
+    ["W","Naris Z"],
+  ];
   return (
     <main className="cstage">
-      <div className="legend mono"><span><i style={{background:"#2b3138"}}/>oprema</span><span><i style={{background:"#e2553f"}}/>jedro</span><span><i style={{background:"#d9a23b",opacity:.5}}/>halo</span><span><i style={{background:"#c0392b"}}/>halo prekrit</span><span><i style={{background:"#5aa9e6"}}/>lok vrat</span><span><i style={{background:"#16b3b3"}}/>mokri zid</span><span><i style={{background:"#5bbd8b"}}/>pot</span><span><i style={{background:"#e2553f"}}/>blokada</span></div>
-      <div className="sheet">{best? <O2Plan cand={best} cfg={cfg} zones={zones} routing={routing} paths={showPaths?paths:[]} bandMin={pathMin} bandWant={pathWant}/> : <div className="noRes">{!feasibility.feasible?<>Brief ni izvedljiv:<br/>{feasibility.reasons.join(" · ")}</>:!hasDoor?"Dodaj vrata - soba brez vrat nima veljavne rešitve.":soft?"Ni veljavne razporeditve ob teh omejitvah. Povečaj prostor ali zrahljaj zahteve.":"V strogem načinu ni rešitve - vklopi mehka pravila."}</div>}</div>
+      <div className="legend mono"><span><i style={{background:"#2b3138"}}/>oprema</span><span><i style={{background:"#e2553f"}}/>jedro</span><span><i style={{background:"#d9a23b",opacity:.5}}/>halo</span><span><i style={{background:"#c0392b"}}/>prekrivanje</span><span><i style={{background:"#5aa9e6",opacity:.35}}/>človek</span><span><i style={{background:"#86c9ff",opacity:.5}}/>okno</span><span><i style={{background:"#16b3b3"}}/>mokri zid</span><span><i style={{background:"#5bbd8b"}}/>pot</span></div>
+      <div className="viewTabs" role="tablist" aria-label="Pogled risbe">
+        {viewButtons.map(([id,label])=><button key={id} className={view===id?"on":""} onClick={()=>setView(id)}>{label}</button>)}
+      </div>
+      <div className="sheet">{best? (wallView
+        ? <ElevationView cand={best} cfg={cfg} wall={wallView}/>
+        : <O2Plan cand={best} cfg={cfg} zones={zones} routing={routing} paths={showPaths?paths:[]} bandMin={pathMin} bandWant={pathWant}/>)
+        : <div className="noRes">{!feasibility.feasible?<>Brief ni izvedljiv:<br/>{feasibility.reasons.join(" · ")}</>:!hasDoor?"Dodaj vrata - soba brez vrat nima veljavne rešitve.":soft?"Ni veljavne razporeditve ob teh omejitvah. Povečaj prostor ali zrahljaj zahteve.":"V strogem načinu ni rešitve - vklopi mehka pravila."}</div>}</div>
       <div className="poolBar">{pool.length>0 && <><span className="mono">{pool.length} veljavnih</span>{pool.slice(0,8).map((c,i)=><button key={i} className={"thumb "+(idx===i?"on":"")} onClick={()=>setIdx(i)}><span className="mono">{(c.ev.score*100|0)}</span></button>)}</>}</div>
     </main>
   );
@@ -598,6 +614,45 @@ function O2Plan({cand,cfg,zones,routing,paths=[],bandMin=600,bandWant=900}){ con
   </svg>;
 }
 
+const WALL_LABELS={N:"S",E:"V",S:"J",W:"Z"};
+function ElevationView({cand,cfg,wall}){
+  const model=buildElevation(cand.placed,cfg,wall);
+  const PADL=360,PADR=160,PADT=260,PADB=280;
+  const axis=model.width;
+  const yOf=(r)=>model.height-r.y-r.h;
+  const ticks=[];
+  for(let z=0;z<=model.height;z+=500)ticks.push(z);
+  if(ticks[ticks.length-1]!==model.height)ticks.push(model.height);
+  const fillOf=(r)=>r.kind==="human"?"#5aa9e6":r.kind==="window"?"#86c9ff":"#dfe6df";
+  const strokeOf=(r)=>r.kind==="human"?"#3a78b0":r.kind==="window"?"#3f86c9":"#2b3138";
+  return <svg viewBox={`${-PADL} ${-PADT} ${axis+PADL+PADR} ${model.height+PADT+PADB}`} style={{width:"100%",height:"100%"}}>
+    <rect x={-PADL} y={-PADT} width={axis+PADL+PADR} height={model.height+PADT+PADB} fill="#f6f7f3"/>
+    <g fontFamily="ui-monospace,Menlo,monospace" fill="#8a96a3">
+      <text x={axis/2} y={-126} fontSize="96" textAnchor="middle">Naris {WALL_LABELS[wall]} · vzdolž zidu / višina Z</text>
+      <line x1="0" y1={model.height} x2={axis} y2={model.height} stroke="#2b3138" strokeWidth="18"/>
+      <line x1="-120" y1="0" x2="-120" y2={model.height} stroke="#2b3138" strokeWidth="14"/>
+      {ticks.map(z=><g key={z}>
+        <line x1="-160" y1={model.height-z} x2={axis} y2={model.height-z} stroke="#c7cfd6" strokeWidth="8" opacity={z===0?0:0.55}/>
+        <line x1="-160" y1={model.height-z} x2="-82" y2={model.height-z} stroke="#2b3138" strokeWidth="12"/>
+        <text x="-188" y={model.height-z} dy="30" fontSize="76" textAnchor="end">{z}</text>
+      </g>)}
+      <text x="-188" y="-46" fontSize="76" textAnchor="end">mm</text>
+      <text x={axis/2} y={model.height+146} fontSize="76" textAnchor="middle">{axis} mm</text>
+    </g>
+    {model.rects.map(r=><g key={r.id}>
+      <rect x={r.x} y={yOf(r)} width={r.w} height={r.h} rx="16" fill={fillOf(r)} fillOpacity={r.kind==="human"?0.24:r.kind==="window"?0.36:0.95} stroke={strokeOf(r)} strokeWidth={r.kind==="human"?16:18} strokeDasharray={r.kind==="human"||r.kind==="window"?"52 36":"none"}/>
+      {r.kind==="window"&&<line x1={r.x} y1={yOf(r)+r.h} x2={r.x+r.w} y2={yOf(r)+r.h} stroke="#3f86c9" strokeWidth="24"/>}
+      <text x={r.x+r.w/2} y={yOf(r)+Math.min(r.h/2,130)} dy="32" fill={r.kind==="human"?"#2e6f9e":"#3a444f"} fontSize="78" fontFamily="ui-sans-serif,system-ui" textAnchor="middle">{r.kind==="human"?"človek":r.name}</text>
+      {r.kind==="window"&&<text x={r.x+r.w/2} y={yOf(r)+r.h+86} fill="#3f86c9" fontSize="58" fontFamily="ui-monospace,Menlo,monospace" textAnchor="middle">parapet {Math.round(r.y)}</text>}
+    </g>)}
+    {model.conflicts.map((r,i)=><g key={"c"+i}>
+      <rect x={r.x} y={model.height-r.y-r.h} width={r.w} height={r.h} fill="#c0392b" opacity=".48" stroke="#e2553f" strokeWidth="24"/>
+      <text x={r.x+r.w/2} y={model.height-r.y-r.h-42} fill="#b03a2e" fontSize="64" fontFamily="ui-monospace,Menlo,monospace" textAnchor="middle">3D trk</text>
+    </g>)}
+    {model.rects.length===0&&<text x={axis/2} y={model.height/2} fill="#7c8794" fontSize="86" fontFamily="ui-sans-serif,system-ui" textAnchor="middle">Na tem zidu ni elementov za naris.</text>}
+  </svg>;
+}
+
 function Door({p,W,D}){
   // geometrija iz testirane čiste funkcije (geometry.doorSwing) — tečaj fiksen na
   // zidu, krilo pravokotno, lok z radijem=širina krila okoli tečaja, sweep iz atan2
@@ -646,6 +701,9 @@ const CSS=`
 .cstage{background:var(--bg);display:flex;flex-direction:column;min-height:480px}
 .legend{display:flex;gap:13px;flex-wrap:wrap;padding:12px 16px;font-size:10.5px;color:var(--mut)}
 .legend span{display:flex;gap:5px;align-items:center}.legend i{width:11px;height:11px;border-radius:3px;display:inline-block}
+.viewTabs{display:flex;gap:7px;padding:0 16px 12px;flex-wrap:wrap}
+.viewTabs button{height:30px;padding:0 11px;border-radius:7px;border:1px solid var(--bd);background:var(--panel);color:var(--mut);font-size:11px;cursor:pointer}
+.viewTabs button.on{border-color:var(--cy);background:#0e2626;color:var(--cy)}
 .sheet{flex:1;margin:0 16px;background:#f6f7f3;border-radius:11px;border:1px solid var(--bd);overflow:hidden;min-height:360px;touch-action:none;display:flex;align-items:center;justify-content:center}
 .noRes,.noRes2{color:var(--mut);font-size:13px;padding:30px;text-align:center;line-height:1.6}.noRes2{padding:14px}
 .num{margin-bottom:12px}.fhd{display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:6px}.fhd .mono{color:var(--cy)}
