@@ -449,70 +449,88 @@ function ReviewPanel({rp}){
   return (
     <aside className="col">
       {best? <>
-        <div className="eyebrow">Preverba pravil · ocena <span className="mono">{(best.ev.score*100|0)}</span></div>
-        <div className="check ok2">✓ trda jedra se ne prekrivajo</div>
-        <div className="check ok2">✓ lok vrat prost (P-01)</div>
-        <div className="check ok2">✓ prehod {Math.round(best.ev.aisle)} mm ≥ {cfg.minAisle}</div>
-        <div className="eyebrow mt">Mehke kazni (halo)</div>
-        {best.ev.overlaps.length>0 ? best.ev.overlaps.map((o,i)=>(
-          <div key={i} className="soft2"><span className="sw"/>{o.a} ↔ {o.b}<br/><span className="mono">{(o.area/1e6).toFixed(2)} m² → dovoljeno, kaznovano</span></div>
-        )) : <div className="soft2 none">brez prekrivanj halo - čista razporeditev</div>}
-        <div className="eyebrow mt">Instalacije</div>
-        <div className="drain"><span className="mono">{((routing?.totalLength||0)/1000).toFixed(2)} m</span> skupne trase<br/><i>O5 računa od dejanske priklopne točke</i></div>
-        {routing?.reroutedCount>0 && <div className="warnNote">{routing.reroutedCount} priklopov v tla je preusmerjenih po steni (talne trase niso dovoljene).</div>}
-        {routing?.floorCrossingCount>0 && <div className="warnNote">{routing.floorCrossingCount} talnih tras ima križanje.</div>}
-        <div className="routeList">{routing?.routes.map(r=><div key={r.id} className={"routeItem "+r.via}>
-          <span>{r.fixtureName} · {CONN[r.connection.type].short} · {r.via==="floor"?"tla":r.rerouted?"zid (preusmerjeno)":"zid"}</span>
-          <b className="mono">{(r.length/1000).toFixed(2)} m</b>
-        </div>)}</div>
-        <div className="eyebrow mt">Poti · rang 1 ({profile.name})</div>
-        {paths.length>0 ? <div className="routeList">{paths.map((pt,i)=>(
-          <div key={i} className="routeItem" style={pt.reachable?{}:{borderColor:"#7a3028",color:"#f08a78"}}>
-            <span>{pt.name} · {pt.reachable?"prehodno":"NI POTI"}</span>
-            <b className="mono">{pt.reachable?Math.round(pt.minWidth)+" mm":"blok"}</b>
-          </div>
-        ))}</div> : <div className="soft2 none">Ni elementov za pot.</div>}
-        <div className="softNote">Najožja širina mora prenesti profil ({pathWidthFor(profile)} mm). Rang 2 (srečanje dveh) = 2× profil.</div>
-        <div className="eyebrow mt">A/B preference · aktivno učenje</div>
-        {optionA&&optionB ? <div className="abBox">
-          <div className="abBtns">
-            <button onClick={()=>choosePreference(optionA,optionB)}>A <span className="mono">{(optionA.ev.score*100|0)}</span></button>
-            <button onClick={()=>choosePreference(optionB,optionA)}>B <span className="mono">{(optionB.ev.score*100|0)}</span></button>
-          </div>
-          <div className="exploreRow">
-            <span>raziskovanje <b className="mono">{Math.round(explore*100)}</b> · izkoriščanje <b className="mono">{Math.round((1-explore)*100)}</b></span>
-            <input type="range" min="0" max="1" step="0.05" value={explore} onChange={e=>setExplore(+e.target.value)} style={{width:"100%",accentColor:"#5aa9e6"}}/>
-            <span className="abHint">{explore>0.66?"Ugani kdo: par, ki najbolj prepolovi negotovost":explore<0.34?"izkoriščanje: kaže najboljši par":"mešano: informativno + kvaliteta"} · donos para <b className="mono">{(abPair.info*100|0)}</b></span>
-            <button className="microBtn" onClick={()=>setExplore(suggestedExplore(pref.comparisons))}>predlagaj ({Math.round(suggestedExplore(pref.comparisons)*100)})</button>
-          </div>
-          <div className="prefBars">
-            <span>halo <b className="mono">{Math.round(pref.weights.halo*100)}</b></span>
-            <span>odtok <b className="mono">{Math.round(pref.weights.drain*100)}</b></span>
-          </div>
-          <div className="prefBars"><span>donos <b className="mono">{Math.round(measurePreferenceGain(pref)*100)}</b></span><span>stabilnost <b className="mono">{pref.stableStreak}</b></span></div>
-          <div className={pref.converged?"conv on":"conv"}>{pref.converged?`konvergenca po ${pref.comparisons} primerjavah`:`${pref.comparisons} primerjav · signal ${pref.dominantSignal}`}</div>
-        </div> : <div className="soft2 none">Za A/B sta potrebni vsaj dve veljavni rešitvi.</div>}
-        <div className="eyebrow mt">Testna miza kanalov</div>
-        <div className="channelBench">
-          {channels.map(ch=>{
-            const score=bestChannelScores?.scores.find(s=>s.channelId===ch.id);
-            return <div key={ch.id} className={"channelCard "+(!ch.enabled?"off":"")}>
-              <div className="chTop"><label><input type="checkbox" checked={ch.enabled} onChange={e=>setChannel(ch.id,{enabled:e.target.checked})}/> {ch.name}</label><span>{ch.family}</span></div>
-              <div className="chScope"><button className={ch.scope==="global"?"on":""} onClick={()=>setChannel(ch.id,{scope:"global"})}>global</button><button className={ch.scope==="room-type"?"on":""} onClick={()=>setChannel(ch.id,{scope:"room-type"})}>room</button></div>
-              <label className="chSlider">prior <input type="range" min="0" max="1" step="0.01" value={ch.prior} onChange={e=>setChannel(ch.id,{prior:+e.target.value})}/><b className="mono">{Math.round(ch.prior*100)}</b></label>
-              <label className="chSlider">zaup. <input type="range" min="0" max="1" step="0.01" value={ch.confidence} onChange={e=>setChannel(ch.id,{confidence:+e.target.value})}/><b className="mono">{Math.round(ch.confidence*100)}</b></label>
-              <div className="chBars">
-                <span style={{"--w":`${ch.prior*100}%`}}>prior</span>
-                <span style={{"--w":`${ch.learned*100}%`}}>learned</span>
-                <span style={{"--w":`${effectiveWeight(ch)*100}%`}}>eff</span>
-              </div>
-              <div className="chScore">score <b className="mono">{score?Math.round(score.value*100):"-"}</b></div>
+        <Section k="rules" title={<>Preverba pravil · ocena <span className="mono">{(best.ev.score*100|0)}</span></>}>
+          <div className="check ok2">✓ trda jedra se ne prekrivajo</div>
+          <div className="check ok2">✓ lok vrat prost (P-01)</div>
+          <div className="check ok2">✓ prehod {Math.round(best.ev.aisle)} mm ≥ {cfg.minAisle}</div>
+        </Section>
+        <Section k="halo" title="Mehke kazni (halo)">
+          {best.ev.overlaps.length>0 ? best.ev.overlaps.map((o,i)=>(
+            <div key={i} className="soft2"><span className="sw"/>{o.a} ↔ {o.b}<br/><span className="mono">{(o.area/1e6).toFixed(2)} m² → dovoljeno, kaznovano</span></div>
+          )) : <div className="soft2 none">brez prekrivanj halo - čista razporeditev</div>}
+        </Section>
+        <Section k="install" title="Instalacije">
+          <div className="drain"><span className="mono">{((routing?.totalLength||0)/1000).toFixed(2)} m</span> skupne trase<br/><i>O5 računa od dejanske priklopne točke</i></div>
+          {routing?.reroutedCount>0 && <div className="warnNote">{routing.reroutedCount} priklopov v tla je preusmerjenih po steni (talne trase niso dovoljene).</div>}
+          {routing?.floorCrossingCount>0 && <div className="warnNote">{routing.floorCrossingCount} talnih tras ima križanje.</div>}
+          <div className="routeList">{routing?.routes.map(r=><div key={r.id} className={"routeItem "+r.via}>
+            <span>{r.fixtureName} · {CONN[r.connection.type].short} · {r.via==="floor"?"tla":r.rerouted?"zid (preusmerjeno)":"zid"}</span>
+            <b className="mono">{(r.length/1000).toFixed(2)} m</b>
+          </div>)}</div>
+        </Section>
+        <Section k="paths" title={`Poti · rang 1 (${profile.name})`}>
+          {paths.length>0 ? <div className="routeList">{paths.map((pt,i)=>(
+            <div key={i} className="routeItem" style={pt.reachable?{}:{borderColor:"#7a3028",color:"#f08a78"}}>
+              <span>{pt.name} · {pt.reachable?"prehodno":"NI POTI"}</span>
+              <b className="mono">{pt.reachable?Math.round(pt.minWidth)+" mm":"blok"}</b>
             </div>
-          })}
-        </div>
+          ))}</div> : <div className="soft2 none">Ni elementov za pot.</div>}
+          <div className="softNote">Najožja širina mora prenesti profil ({pathWidthFor(profile)} mm). Rang 2 (srečanje dveh) = 2× profil.</div>
+        </Section>
+        <Section k="ab" title="A/B preference · aktivno učenje">
+          {optionA&&optionB ? <div className="abBox">
+            <div className="abBtns">
+              <button onClick={()=>choosePreference(optionA,optionB)}>A <span className="mono">{(optionA.ev.score*100|0)}</span></button>
+              <button onClick={()=>choosePreference(optionB,optionA)}>B <span className="mono">{(optionB.ev.score*100|0)}</span></button>
+            </div>
+            <div className="exploreRow">
+              <span>raziskovanje <b className="mono">{Math.round(explore*100)}</b> · izkoriščanje <b className="mono">{Math.round((1-explore)*100)}</b></span>
+              <input type="range" min="0" max="1" step="0.05" value={explore} onChange={e=>setExplore(+e.target.value)} style={{width:"100%",accentColor:"#5aa9e6"}}/>
+              <span className="abHint">{explore>0.66?"Ugani kdo: par, ki najbolj prepolovi negotovost":explore<0.34?"izkoriščanje: kaže najboljši par":"mešano: informativno + kvaliteta"} · donos para <b className="mono">{(abPair.info*100|0)}</b></span>
+              <button className="microBtn" onClick={()=>setExplore(suggestedExplore(pref.comparisons))}>predlagaj ({Math.round(suggestedExplore(pref.comparisons)*100)})</button>
+            </div>
+            <div className="prefBars">
+              <span>halo <b className="mono">{Math.round(pref.weights.halo*100)}</b></span>
+              <span>odtok <b className="mono">{Math.round(pref.weights.drain*100)}</b></span>
+            </div>
+            <div className="prefBars"><span>donos <b className="mono">{Math.round(measurePreferenceGain(pref)*100)}</b></span><span>stabilnost <b className="mono">{pref.stableStreak}</b></span></div>
+            <div className={pref.converged?"conv on":"conv"}>{pref.converged?`konvergenca po ${pref.comparisons} primerjavah`:`${pref.comparisons} primerjav · signal ${pref.dominantSignal}`}</div>
+          </div> : <div className="soft2 none">Za A/B sta potrebni vsaj dve veljavni rešitvi.</div>}
+        </Section>
+        <Section k="bench" title="Testna miza kanalov" defaultOpen={false}>
+          <div className="channelBench">
+            {channels.map(ch=>{
+              const score=bestChannelScores?.scores.find(s=>s.channelId===ch.id);
+              return <div key={ch.id} className={"channelCard "+(!ch.enabled?"off":"")}>
+                <div className="chTop"><label><input type="checkbox" checked={ch.enabled} onChange={e=>setChannel(ch.id,{enabled:e.target.checked})}/> {ch.name}</label><span>{ch.family}</span></div>
+                <div className="chScope"><button className={ch.scope==="global"?"on":""} onClick={()=>setChannel(ch.id,{scope:"global"})}>global</button><button className={ch.scope==="room-type"?"on":""} onClick={()=>setChannel(ch.id,{scope:"room-type"})}>room</button></div>
+                <label className="chSlider">prior <input type="range" min="0" max="1" step="0.01" value={ch.prior} onChange={e=>setChannel(ch.id,{prior:+e.target.value})}/><b className="mono">{Math.round(ch.prior*100)}</b></label>
+                <label className="chSlider">zaup. <input type="range" min="0" max="1" step="0.01" value={ch.confidence} onChange={e=>setChannel(ch.id,{confidence:+e.target.value})}/><b className="mono">{Math.round(ch.confidence*100)}</b></label>
+                <div className="chBars">
+                  <span style={{"--w":`${ch.prior*100}%`}}>prior</span>
+                  <span style={{"--w":`${ch.learned*100}%`}}>learned</span>
+                  <span style={{"--w":`${effectiveWeight(ch)*100}%`}}>eff</span>
+                </div>
+                <div className="chScore">score <b className="mono">{score?Math.round(score.value*100):"-"}</b></div>
+              </div>
+            })}
+          </div>
+        </Section>
       </> : <div className="noRes2">Ni veljavne rešitve za te zahteve.</div>}
     </aside>
   );
+}
+
+/* Zložljiva sekcija desnega stolpca — klik na naslov skrije/pokaže telo. */
+function Section({k,title,defaultOpen=true,children}){
+  const [open,setOpen]=usePersistentState("floorplanner.sec."+k,defaultOpen);
+  return <div className={"sec "+(open?"open":"")}>
+    <button className="secHd" onClick={()=>setOpen(o=>!o)}>
+      <span className="chev">{open?"▾":"▸"}</span>
+      <span className="secTtl eyebrow">{title}</span>
+    </button>
+    {open && <div className="secBody">{children}</div>}
+  </div>;
 }
 
 function O2Plan({cand,cfg,zones,routing,paths=[]}){ const {W,D,wetWall}=cfg; const PAD=900; const we=wallEdge(wetWall,W,D);
@@ -703,6 +721,13 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 @media(max-width:1080px){.grid2c,.grid2c.wide{grid-template-columns:1fr}}
 .phaseCta{display:flex;justify-content:flex-end;padding:14px 18px;background:var(--panel)}
 .ctaNext{background:#0e2626;border:1px solid #1f4444;color:var(--cy);border-radius:8px;padding:9px 18px;font-size:12.5px;cursor:pointer}.ctaNext:hover{border-color:var(--cy)}
+/* zložljive sekcije desnega stolpca */
+.sec{border-top:1px solid var(--bd)}.sec:first-child{border-top:none}
+.secHd{width:100%;display:flex;align-items:center;gap:8px;background:none;border:none;color:var(--tx);cursor:pointer;text-align:left;padding:13px 0 11px}
+.secHd .chev{color:var(--mut);font-size:11px;width:12px;flex:none}
+.secHd .secTtl{margin-bottom:0}
+.secHd:hover .secTtl{color:var(--cy)}
+.secBody{padding-bottom:6px}
 `;
 
 
