@@ -105,15 +105,31 @@ describe('service routing', () => {
     expect(south.totalLength).toBeLessThan(north.totalLength);
   });
 
-  it('marks floor routes as blocked when slab policy disallows them', () => {
+  it('reroutes floor connections along the wall when slab routes are disallowed', () => {
     const library = baseLib();
     const toilet = placeRects(library.toilet, 'S', 200, 1900, 2200);
     const placed: PlacedElement[] = [{ ...toilet, el: library.toilet, wall: 'S', name: library.toilet.name }];
 
     const result = routeServices(placed, { W: 1900, D: 2200, wetWall: 'N', minAisle: 800 }, { allowFloorRoutes: false });
 
-    expect(result.blockedCount).toBe(1);
-    expect(result.routes.find((route) => route.connection.routesTo === 'floor')?.blocked).toBe(true);
+    expect(result.reroutedCount).toBe(1);
+    const floor = result.routes.find((route) => route.connection.routesTo === 'floor');
+    expect(floor?.rerouted).toBe(true);
+    expect(floor?.via).toBe('wall'); // preusmerjeno po steni, ne čez tla
+    expect(floor!.path.length).toBeGreaterThan(2); // gre okrog vogala po obodu
+  });
+
+  it('keeps floor connections straight under the slab when allowed', () => {
+    const library = baseLib();
+    const toilet = placeRects(library.toilet, 'S', 200, 1900, 2200);
+    const placed: PlacedElement[] = [{ ...toilet, el: library.toilet, wall: 'S', name: library.toilet.name }];
+
+    const result = routeServices(placed, { W: 1900, D: 2200, wetWall: 'N', minAisle: 800 }, { allowFloorRoutes: true });
+    const floor = result.routes.find((route) => route.connection.routesTo === 'floor');
+
+    expect(floor?.via).toBe('floor');
+    expect(floor?.rerouted).toBe(false);
+    expect(floor?.path).toHaveLength(2);
   });
 });
 

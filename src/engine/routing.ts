@@ -13,16 +13,17 @@ export interface ServiceRoute {
   connection: Connection;
   from: Point;
   to: Point;
+  path: Point[]; // dejanska poliferna trasa (po tleh ali po steni)
   via: 'wall' | 'floor';
   length: number;
-  blocked: boolean;
+  rerouted: boolean; // priklop v tla, preusmerjen po steni, ker talne trase niso dovoljene
   crossesFloorRoute: boolean;
 }
 
 export interface RoutingResult {
   routes: ServiceRoute[];
   totalLength: number;
-  blockedCount: number;
+  reroutedCount: number;
   floorCrossingCount: number;
 }
 
@@ -40,15 +41,23 @@ export function routeServices(
     fixture.el.conns.map((connection) => {
       const from = placedConnectionPoint(fixture, connection);
       const to = projectToWetWall(from, cfg.wetWall, cfg.W, cfg.D);
+      const wantsFloor = connection.routesTo === 'floor';
+      const useFloor = wantsFloor && policy.allowFloorRoutes;
+
+      // Po tleh = ravna trasa pod ploščo. Po steni = trasa po obodu (hugging),
+      // saj cev ne sme čez tla.
+      const path = useFloor ? [from, to] : wallPath(from, fixture.wall, cfg.wetWall, cfg.W, cfg.D);
+
       return {
         id: `${fixture.name}-${connection.id}`,
         fixtureName: fixture.name,
         connection,
         from,
         to,
-        via: connection.routesTo,
-        length: manhattan(from, to),
-        blocked: connection.routesTo === 'floor' && !policy.allowFloorRoutes,
+        path,
+        via: useFloor ? 'floor' : 'wall',
+        length: polylineLength(path),
+        rerouted: wantsFloor && !policy.allowFloorRoutes,
         crossesFloorRoute: false,
       } satisfies ServiceRoute;
     }),
@@ -59,7 +68,7 @@ export function routeServices(
   return {
     routes,
     totalLength: routes.reduce((sum, route) => sum + route.length, 0),
-    blockedCount: routes.filter((route) => route.blocked).length,
+    reroutedCount: routes.filter((route) => route.rerouted).length,
     floorCrossingCount: routes.filter((route) => route.crossesFloorRoute).length,
   };
 }
@@ -101,8 +110,79 @@ export function projectToWetWall(point: Point, wetWall: Wall, roomW: number, roo
   return { x: roomW, y: point.y };
 }
 
-function manhattan(a: Point, b: Point): number {
-  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+function projectToWall(point: Point, wall: Wall, roomW: number, roomD: number): Point {
+  if (wall === 'N') return { x: point.x, y: 0 };
+  if (wall === 'S') return { x: point.x, y: roomD };
+  if (wall === 'W') return { x: 0, y: point.y };
+  return { x: roomW, y: point.y };
+}
+
+/**
+ * Trasa po stenah (obodu) od priklopa do mokrega zidu: cev gre do svojega zidu,
+ * nato po obodu sobe (mimo vogalov) do mokrega zidu — nikoli čez tla.
+ */
+export function wallPath(from: Point, fixtureWall: Wall, wetWall: Wall, roomW: number, roomD: number): Point[] {
+  const start = projectToWall(from, fixtureWall, roomW, roomD);
+  const end = projectToWetWall(from, wetWall, roomW, roomD);
+  const perim = 2 * (roomW + roomD);
+  const s1 = perimeterS(start, roomW, roomD);
+  const s2 = perimeterS(end, roomW, roomD);
+
+  const fwd = mod(s2 - s1, perim);
+  const bwd = perim - fwd;
+  const dir = fwd <= bwd ? 1 : -1;
+  const span = dir === 1 ? fwd : bwd;
+
+  const cornerS = [0, roomW, roomW + roomD, 2 * roomW + roomD];
+  const mids = cornerS
+    .map((c) => ({ c, d: mod((c - s1) * dir, perim) }))
+    .filter((o) => o.d > 1 && o.d < span - 1)
+    .sort((a, b) => a.d - b.d)
+    .map((o) => perimeterPoint(o.c, roomW, roomD));
+
+  return dedupe([from, start, ...mids, end]);
+}
+
+function perimeterS(p: Point, W: number, D: number): number {
+  const eps = 1;
+  if (Math.abs(p.y) <= eps) return clampN(p.x, 0, W); // N
+  if (Math.abs(p.x - W) <= eps) return W + clampN(p.y, 0, D); // E
+  if (Math.abs(p.y - D) <= eps) return W + D + (W - clampN(p.x, 0, W)); // S
+  return 2 * W + D + (D - clampN(p.y, 0, D)); // W
+}
+
+function perimeterPoint(s: number, W: number, D: number): Point {
+  const perim = 2 * (W + D);
+  const t = mod(s, perim);
+  if (t <= W) return { x: t, y: 0 };
+  if (t <= W + D) return { x: W, y: t - W };
+  if (t <= 2 * W + D) return { x: W - (t - (W + D)), y: D };
+  return { x: 0, y: D - (t - (2 * W + D)) };
+}
+
+function polylineLength(path: Point[]): number {
+  let total = 0;
+  for (let i = 1; i < path.length; i += 1) {
+    total += Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
+  }
+  return total;
+}
+
+function dedupe(path: Point[]): Point[] {
+  const out: Point[] = [];
+  for (const p of path) {
+    const last = out[out.length - 1];
+    if (!last || Math.hypot(p.x - last.x, p.y - last.y) > 1) out.push(p);
+  }
+  return out;
+}
+
+function mod(a: number, n: number): number {
+  return ((a % n) + n) % n;
+}
+
+function clampN(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
 }
 
 function markFloorCrossings(routes: ServiceRoute[]): void {

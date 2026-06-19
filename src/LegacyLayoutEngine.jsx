@@ -403,7 +403,7 @@ function ConstraintsPanel({rp,library}){
       <label className="softTgl"><input type="checkbox" checked={soft} onChange={e=>setSoft(e.target.checked)}/> <span>Mehka pravila: halo se sme upogniti</span></label>
       <div className="softNote">{soft?"Halo se sme prekriti (kazen). Lok vrat ostane TRDO pravilo - vanj nikoli.":"Strogo: vsako prekrivanje halo = zavrnitev."}</div>
       <label className="softTgl"><input type="checkbox" checked={allowFloorRoutes} onChange={e=>setAllowFloorRoutes(e.target.checked)}/> <span>O5: talne trase dovoljene</span></label>
-      <div className="softNote">{allowFloorRoutes?"Priklopi, ki vodijo v tla, se lahko trasirajo po plošči.":"Talne trase ostanejo vidne, vendar so označene kot blokirane."}</div>
+      <div className="softNote">{allowFloorRoutes?"Priklopi, ki vodijo v tla, se trasirajo naravnost po plošči.":"Priklopi v tla se preusmerijo po steni (obodu) do mokrega zidu - daljša trasa, brez prebijanja plošče."}</div>
       <button className="regen" onClick={()=>setSeed(s=>s+1)}>↻ Generiraj</button>
     </aside>
   );
@@ -437,10 +437,10 @@ function ReviewPanel({rp}){
         )) : <div className="soft2 none">brez prekrivanj halo - čista razporeditev</div>}
         <div className="eyebrow mt">Instalacije</div>
         <div className="drain"><span className="mono">{((routing?.totalLength||0)/1000).toFixed(2)} m</span> skupne trase<br/><i>O5 računa od dejanske priklopne točke</i></div>
-        {routing?.blockedCount>0 && <div className="warnNote">{routing.blockedCount} talnih tras je blokiranih po politiki plošče.</div>}
+        {routing?.reroutedCount>0 && <div className="warnNote">{routing.reroutedCount} priklopov v tla je preusmerjenih po steni (talne trase niso dovoljene).</div>}
         {routing?.floorCrossingCount>0 && <div className="warnNote">{routing.floorCrossingCount} talnih tras ima križanje.</div>}
-        <div className="routeList">{routing?.routes.map(r=><div key={r.id} className={"routeItem "+r.via+(r.blocked?" blocked":"")}>
-          <span>{r.fixtureName} · {CONN[r.connection.type].short} · {r.via==="floor"?"tla":"zid"}</span>
+        <div className="routeList">{routing?.routes.map(r=><div key={r.id} className={"routeItem "+r.via}>
+          <span>{r.fixtureName} · {CONN[r.connection.type].short} · {r.via==="floor"?"tla":r.rerouted?"zid (preusmerjeno)":"zid"}</span>
           <b className="mono">{(r.length/1000).toFixed(2)} m</b>
         </div>)}</div>
         <div className="eyebrow mt">A/B preference · aktivno učenje</div>
@@ -498,7 +498,7 @@ function O2Plan({cand,cfg,zones,routing}){ const {W,D,wetWall}=cfg; const PAD=90
     </g>
     <line {...we} stroke="#16b3b3" strokeWidth="130"/>
     {(routing?.routes||[]).map(r=><g key={r.id}>
-      <line x1={r.from.x} y1={r.from.y} x2={r.to.x} y2={r.to.y} stroke={r.blocked?"#e2553f":r.via==="floor"?"#d9a23b":"#3f86c9"} strokeWidth="22" strokeDasharray={r.via==="floor"?"60 42":"none"} opacity=".88"/>
+      <polyline points={(r.path||[r.from,r.to]).map(p=>`${p.x},${p.y}`).join(" ")} fill="none" stroke={r.via==="floor"?"#d9a23b":"#3f86c9"} strokeWidth="22" strokeDasharray={r.via==="floor"?"60 42":"none"} strokeLinejoin="round" strokeLinecap="round" opacity=".88"/>
       {r.crossesFloorRoute&&<circle cx={(r.from.x+r.to.x)/2} cy={(r.from.y+r.to.y)/2} r="54" fill="#d9a23b" stroke="#2b3138" strokeWidth="12"/>}
       <circle cx={r.from.x} cy={r.from.y} r="42" fill={CONN[r.connection.type].color} stroke="#0e1116" strokeWidth="9"/>
     </g>)}
