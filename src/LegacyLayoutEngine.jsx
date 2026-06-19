@@ -233,6 +233,22 @@ function O9({library,setLibrary}){
 }
 
 /* ===================== O1 ===================== */
+function ElementMini({el}){
+  const R={x:20,y:22,w:72,h:54};
+  return <svg viewBox="0 0 112 96" className="elementMini" aria-hidden="true">
+    <rect x={R.x} y={R.y} width={R.w} height={R.h} rx="5" fill="#eef1ec" stroke="#2b3138" strokeWidth="4"/>
+    <rect x={R.x} y={R.y+R.h} width={R.w} height="14" fill="#d9a23b" opacity=".22"/>
+    <line x1={R.x} y1={R.y+R.h+Math.min(18,el.clear.core/45)} x2={R.x+R.w} y2={R.y+R.h+Math.min(18,el.clear.core/45)} stroke="#e2553f" strokeWidth="3"/>
+    {serviceSides(el).map(side=>{
+      if(side==="back")return <line key={side} x1={R.x} y1={R.y} x2={R.x+R.w} y2={R.y} stroke="#16b3b3" strokeWidth="5"/>;
+      if(side==="front")return <line key={side} x1={R.x} y1={R.y+R.h} x2={R.x+R.w} y2={R.y+R.h} stroke="#16b3b3" strokeWidth="5"/>;
+      if(side==="left")return <line key={side} x1={R.x} y1={R.y} x2={R.x} y2={R.y+R.h} stroke="#16b3b3" strokeWidth="5"/>;
+      return <line key={side} x1={R.x+R.w} y1={R.y} x2={R.x+R.w} y2={R.y+R.h} stroke="#16b3b3" strokeWidth="5"/>;
+    })}
+    {el.conns.map(c=>{const p=connXY(c,R);return <circle key={c.id} cx={p.x} cy={p.y} r="7" fill={CONN[c.type].color} stroke="#0e1116" strokeWidth="2"/>;})}
+  </svg>;
+}
+
 function O1({library,setLibrary}){
   const [sel,setSel]=useState("toilet"); const [selConn,setSelConn]=useState(null); const [drag,setDrag]=useState(null);
   const svgRef=useRef(null); const el=library[sel]; const ori=orientation(el); const ss=serviceSides(el);
@@ -244,6 +260,16 @@ function O1({library,setLibrary}){
   const onMove=(e)=>{if(!drag)return;const p=toSvg(e);if(!p)return;const ne=nearestEdge(p.x,p.y,R);patch(el=>{const c=el.conns.find(c=>c.id===drag);if(c){c.side=ne.side;c.off=ne.off;}});};
   return (
    <div className="o1" onPointerMove={onMove} onPointerUp={()=>setDrag(null)} onPointerLeave={()=>setDrag(null)}>
+    <div className="elementCards">
+      {Object.entries(library).filter(([,e])=>!isDoor(e)).map(([k,e])=>(
+        <button key={k} className={"elementCard "+(sel===k?"on":"")} onClick={()=>{setSel(k);setSelConn(null);}}>
+          <ElementMini el={e}/>
+          <span className="ecMain"><b>{e.name}</b><i>{e.w}×{e.d}×{e.h??0} mm</i></span>
+          <span className={"src "+e.source}>{e.source==="user"?"uporabnik":"privzeto"}</span>
+          <span className="ecMeta mono">jedro {e.clear.core} · halo {e.clear.halo}</span>
+        </button>
+      ))}
+    </div>
     <div className="grid3">
       <aside className="col">
         <div className="eyebrow">Knjižnica</div>
@@ -913,6 +939,11 @@ const CSS=`
 
 .grid3{display:grid;grid-template-columns:230px 1fr 256px;gap:1px;background:var(--bd)}
 @media(max-width:1080px){.grid3{grid-template-columns:1fr}}
+.elementCards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px;background:var(--bd);padding:1px;margin-bottom:1px}
+.elementCard{min-height:104px;display:grid;grid-template-columns:72px 1fr auto;grid-template-rows:auto 1fr;gap:6px 9px;align-items:center;text-align:left;background:var(--panel);border:1px solid transparent;color:var(--tx);padding:9px;border-radius:8px;cursor:pointer}
+.elementCard.on{border-color:var(--cy);background:#0e2626}.elementCard .src{justify-self:end}.elementMini{width:72px;height:62px;grid-row:1/3;background:#f6f7f3;border-radius:6px}
+.ecMain{display:flex;flex-direction:column;gap:2px;min-width:0}.ecMain b{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ecMain i{font-style:normal;color:var(--mut);font-size:10.5px}
+.ecMeta{grid-column:2/4;font-size:10.5px;color:var(--mut)}
 .col{background:var(--panel);padding:16px 15px}
 .cstage{background:var(--bg);display:flex;flex-direction:column;min-height:480px}
 .legend{display:flex;gap:13px;flex-wrap:wrap;padding:12px 16px;font-size:10.5px;color:var(--mut)}
