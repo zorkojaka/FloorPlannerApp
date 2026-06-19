@@ -896,22 +896,27 @@ function ThreeRoomView({cand,cfg,routing,layers=DEFAULT_LAYERS}){
       if(human)addBox(human,mats.human,false);
     });
 
-    // INSTALACIJE 3D — trasa kot linija po medijevi barvi; gravitacijski odvod
-    // dobi še vertikalo (padec) od višine priklopa navzdol.
-    cand.placed.filter(p=>p.kind!=="door").forEach((p)=>(p.el.conns||[]).forEach((c)=>{
-      if(!layers[c.type])return;
-      const from=placedConnectionPoint(p,c);
-      const to=projectToWetWall(from,wetWall,W,D);
-      const z=connectionZ(p.el,c);
-      const gravity=MEDIA_PROFILE[c.type].gravity;
-      const runZ=gravity?60:z;
-      const mat=new THREE.LineBasicMaterial({color:new THREE.Color(CONN[c.type].color)});
-      const pts=[];
-      if(gravity)pts.push(new THREE.Vector3(from.x-W/2,z,from.y-D/2));
-      pts.push(new THREE.Vector3(from.x-W/2,runZ,from.y-D/2));
-      pts.push(new THREE.Vector3(to.x-W/2,runZ,to.y-D/2));
+    // INSTALACIJE 3D — metodološko korektno: cev NE teče po zraku. Vodoravno gre
+    // po DEJANSKI trasi (route.path: po tleh za talne, ob steni/obodu za stenske)
+    // na ravni tal (FLOOR_RUN). Montažna VERTIKALA poveže višino priklopa
+    // (connectionZ — montaža na zid/element) s to ravnijo. Tako se upošteva
+    // višina montaže glede na tla in stene.
+    const FLOOR_RUN=40; // raven cevi tik nad ploščo (tla/estrih)
+    const elByName=new Map();
+    cand.placed.filter(p=>p.kind!=="door").forEach((p)=>{if(!elByName.has(p.name))elByName.set(p.name,p.el);});
+    (routing?.routes||[]).forEach((r)=>{
+      if(!layers[r.medium])return;
+      const el=elByName.get(r.fixtureName);
+      const z=el?connectionZ(el,r.connection):(r.connection.z??1000);
+      const path=r.path&&r.path.length?r.path:[r.from,r.to];
+      const mat=new THREE.LineBasicMaterial({color:new THREE.Color(CONN[r.medium].color)});
+      const pts=[
+        new THREE.Vector3(r.from.x-W/2,z,r.from.y-D/2),       // priklop na višini montaže
+        new THREE.Vector3(r.from.x-W/2,FLOOR_RUN,r.from.y-D/2), // vertikala do ravni tal
+      ];
+      for(const pt of path)pts.push(new THREE.Vector3(pt.x-W/2,FLOOR_RUN,pt.y-D/2)); // trasa po tleh/ob steni
       group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),mat));
-    }));
+    });
 
     const axes=new THREE.GridHelper(Math.max(W,D),Math.ceil(Math.max(W,D)/250),0xb9c0c7,0xd0d6dc);
     axes.position.y=1;
@@ -968,7 +973,7 @@ function ThreeRoomView({cand,cfg,routing,layers=DEFAULT_LAYERS}){
         }
       });
     };
-  },[cand,cfg,layers]);
+  },[cand,cfg,layers,routing]);
   return <div className="threeHost" ref={hostRef} aria-label="3D pogled prostora"/>;
 }
 

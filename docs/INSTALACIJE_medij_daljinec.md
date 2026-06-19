@@ -52,4 +52,7 @@ Routing/poti se vedno izračunajo; daljinec jih le (ne) nariše.
 Napeljava (vse 4 medije) se nariše v VSEH treh pogledih, ko je sloj vklopljen:
 - **tloris:** trasa po medijevi barvi
 - **naris:** PADEC odvoda (vertikala od višine priklopa navzdol) — tloris padca ne pokaže
-- **3D:** trasa kot linija po barvi (+ vertikala padca za odvod)
+- **3D:** cev NE teče po zraku — vodoravno gre po **dejanski trasi** (po tleh za
+  talne, ob steni/obodu za stenske) na ravni tal; **montažna vertikala** poveže
+  višino priklopa (`connectionZ`) s to ravnijo, zato je upoštevana višina montaže
+  glede na tla in stene.
