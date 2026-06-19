@@ -5,7 +5,7 @@ import { baseLib } from "./elements/library";
 import { CONNECTION_META as CONN, SIDE_LABELS as SIDES, MEDIA_PROFILE, connectionZ, isDoor, orientation, serviceSides } from "./elements/model";
 import { connectionPoint as connXY, nearestEdge, wallEdge, doorSwing } from "./engine/geometry";
 import { generateLayoutPool } from "./engine/generator";
-import { routeServices } from "./engine/routing";
+import { routeServices, placedConnectionPoint, projectToWetWall } from "./engine/routing";
 import { checkFeasibility } from "./engine/feasibility";
 import { initialPreferenceState, rankByPreference, recordPreference } from "./engine/preference";
 import { nextPair, suggestedExplore } from "./engine/active";
@@ -620,10 +620,36 @@ function ABPlanCard({label,badge,cand,cfg,zones,routing,pathMin,pathWant}){
   </div>;
 }
 
+// Daljinec — plasti prikaza. Vpliva SAMO na izris, ne na engine/pravila/rezultat.
+const DEFAULT_LAYERS={walls:true,equipment:true,doors:true,windows:true,cores:false,halo:false,paths:false,humans:false,"water-out":false,"water-in":false,electric:false,vent:false};
+const LAYER_GROUPS=[
+  {name:"Prostor",items:[["walls","stene"],["equipment","oprema"],["doors","vrata"],["windows","okna"]]},
+  {name:"Pravila",items:[["cores","jedra"],["halo","halo"],["paths","poti"],["humans","človeški kvadri"]]},
+  {name:"Instalacije",media:true,items:[["water-out","voda-odvod"],["water-in","voda-dovod"],["electric","elektrika"],["vent","zrak"]]},
+];
+const MEDIA_KEYS=["water-out","water-in","electric","vent"];
+
+function Daljinec({layers,toggle,toggleGroup}){
+  return <aside className="daljinec">
+    <div className="eyebrow">Daljinec · plasti</div>
+    {LAYER_GROUPS.map(g=>{
+      const allOn=g.items.every(([k])=>layers[k]);
+      return <div key={g.name} className="layGroup">
+        <label className="layHd"><input type="checkbox" checked={allOn} onChange={()=>toggleGroup(g,!allOn)}/> <b>{g.name}</b></label>
+        {g.items.map(([k,label])=><label key={k} className="layItem"><input type="checkbox" checked={!!layers[k]} onChange={()=>toggle(k)}/> {g.media&&<i className="medDot" style={{background:CONN[k].color}}/>}{label}</label>)}
+      </div>;
+    })}
+    <div className="softNote">Daljinec spreminja samo izris — ne pravil, ne rezultata.</div>
+  </aside>;
+}
+
 function StagePanel({rp}){
   const {best,cfg,zones,routing,feasibility,hasDoor,soft,pool,idx,setIdx,paths,showPaths,pathMin,pathWant}=rp;
   const [view,setView]=usePersistentState("floorplanner.stageView","plan");
-  const [show3DHumans,setShow3DHumans]=usePersistentState("floorplanner.show3DHumans",false);
+  const [rawLayers,setRawLayers]=usePersistentState("floorplanner.layers",DEFAULT_LAYERS);
+  const layers=useMemo(()=>({...DEFAULT_LAYERS,...rawLayers}),[rawLayers]);
+  const toggle=(k)=>setRawLayers(L=>({...DEFAULT_LAYERS,...L,[k]:!(({...DEFAULT_LAYERS,...L})[k])}));
+  const toggleGroup=(g,on)=>setRawLayers(L=>{const next={...DEFAULT_LAYERS,...L};g.items.forEach(([k])=>next[k]=on);return next;});
   const wallView=["N","E","S","W"].includes(view)?view:null;
   const viewButtons=[
     ["plan","Tloris"],
@@ -638,14 +664,16 @@ function StagePanel({rp}){
       <div className="legend mono"><span><i style={{background:"#2b3138"}}/>oprema</span><span><i style={{background:"#e2553f"}}/>jedro</span><span><i style={{background:"#d9a23b",opacity:.5}}/>halo</span><span><i style={{background:"#c0392b"}}/>prekrivanje</span><span><i style={{background:"#5aa9e6",opacity:.35}}/>človek</span><span><i style={{background:"#86c9ff",opacity:.5}}/>okno</span><span><i style={{background:"#8a96a3"}}/>stena</span><span><i style={{background:"#16b3b3"}}/>mokri zid</span><span><i style={{background:"#5bbd8b"}}/>pot</span></div>
       <div className="viewTabs" role="tablist" aria-label="Pogled risbe">
         {viewButtons.map(([id,label])=><button key={id} className={view===id?"on":""} onClick={()=>setView(id)}>{label}</button>)}
-        {view==="3d"&&<label className="sceneTgl"><input type="checkbox" checked={show3DHumans} onChange={e=>setShow3DHumans(e.target.checked)}/> človek</label>}
       </div>
-      <div className="sheet">{best? (view==="3d"
-        ? <ThreeRoomView cand={best} cfg={cfg} showHumans={show3DHumans}/>
-        : wallView
-        ? <ElevationView cand={best} cfg={cfg} wall={wallView}/>
-        : <O2Plan cand={best} cfg={cfg} zones={zones} routing={routing} paths={showPaths?paths:[]} bandMin={pathMin} bandWant={pathWant}/>)
-        : <div className="noRes">{!feasibility.feasible?<>Brief ni izvedljiv:<br/>{feasibility.reasons.join(" · ")}</>:!hasDoor?"Dodaj vrata - soba brez vrat nima veljavne rešitve.":soft?"Ni veljavne razporeditve ob teh omejitvah. Povečaj prostor ali zrahljaj zahteve.":"V strogem načinu ni rešitve - vklopi mehka pravila."}</div>}</div>
+      <div className="stageRow">
+        <div className="sheet">{best? (view==="3d"
+          ? <ThreeRoomView cand={best} cfg={cfg} routing={routing} layers={layers}/>
+          : wallView
+          ? <ElevationView cand={best} cfg={cfg} wall={wallView} routing={routing} layers={layers}/>
+          : <O2Plan cand={best} cfg={cfg} zones={zones} routing={routing} paths={paths} bandMin={pathMin} bandWant={pathWant} layers={layers}/>)
+          : <div className="noRes">{!feasibility.feasible?<>Brief ni izvedljiv:<br/>{feasibility.reasons.join(" · ")}</>:!hasDoor?"Dodaj vrata - soba brez vrat nima veljavne rešitve.":soft?"Ni veljavne razporeditve ob teh omejitvah. Povečaj prostor ali zrahljaj zahteve.":"V strogem načinu ni rešitve - vklopi mehka pravila."}</div>}</div>
+        <Daljinec layers={layers} toggle={toggle} toggleGroup={toggleGroup}/>
+      </div>
       <div className="poolBar">{pool.length>0 && <><span className="mono">{pool.length} veljavnih</span>{pool.slice(0,8).map((c,i)=><button key={i} className={"thumb "+(idx===i?"on":"")} onClick={()=>setIdx(i)}><span className="mono">{(c.ev.score*100|0)}</span></button>)}</>}</div>
     </main>
   );
@@ -745,31 +773,34 @@ function Section({k,title,defaultOpen=true,children}){
   </div>;
 }
 
-function O2Plan({cand,cfg,zones,routing,paths=[],bandMin=600,bandWant=900}){ const {W,D,wetWall}=cfg; const PAD=900; const we=wallEdge(wetWall,W,D);
+function O2Plan({cand,cfg,zones,routing,paths=[],bandMin=600,bandWant=900,layers=DEFAULT_LAYERS}){ const {W,D,wetWall}=cfg; const PAD=900; const we=wallEdge(wetWall,W,D);
+  const fixtures=cand.placed.filter(p=>p.kind!=="door");
+  const isWin=(p)=>p.el.kind==="window";
   return <svg viewBox={`${-PAD} ${-PAD} ${W+PAD*2} ${D+PAD*2}`} style={{width:"100%",height:"100%"}}>
     <defs><pattern id="hh" width="80" height="80" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="80" stroke="#d9a23b" strokeWidth="12" opacity=".5"/></pattern>
     <pattern id="nogo" width="70" height="70" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="70" stroke="#e2553f" strokeWidth="16" opacity=".55"/></pattern></defs>
-    <rect x="0" y="0" width={W} height={D} fill="#f6f7f3" stroke="#2b3138" strokeWidth="110"/>
+    {layers.walls&&<rect x="0" y="0" width={W} height={D} fill="#f6f7f3" stroke="#2b3138" strokeWidth="110"/>}
     <g fontFamily="ui-monospace,Menlo,monospace" fontSize="150" fill="#aab4bf" opacity=".65" textAnchor="middle">
       <text x={W/2} y={-300}>S</text>
       <text x={W+360} y={D/2} dy="52">V</text>
       <text x={W/2} y={D+420}>J</text>
       <text x={-360} y={D/2} dy="52">Z</text>
     </g>
-    <line {...we} stroke="#16b3b3" strokeWidth="130"/>
-    {(routing?.routes||[]).map(r=><g key={r.id}>
-      <polyline points={(r.path||[r.from,r.to]).map(p=>`${p.x},${p.y}`).join(" ")} fill="none" stroke={r.via==="floor"?"#d9a23b":"#3f86c9"} strokeWidth="22" strokeDasharray={r.via==="floor"?"60 42":"none"} strokeLinejoin="round" strokeLinecap="round" opacity=".88"/>
-      {r.crossesFloorRoute&&<circle cx={(r.from.x+r.to.x)/2} cy={(r.from.y+r.to.y)/2} r="54" fill="#d9a23b" stroke="#2b3138" strokeWidth="12"/>}
-      <circle cx={r.from.x} cy={r.from.y} r="42" fill={CONN[r.connection.type].color} stroke="#0e1116" strokeWidth="9"/>
+    {layers.walls&&<line {...we} stroke="#16b3b3" strokeWidth="130"/>}
+    {/* INSTALACIJE — trasa po medijevi barvi, vsak medij svoja plast */}
+    {(routing?.routes||[]).filter(r=>layers[r.medium]).map(r=><g key={r.id}>
+      <polyline points={(r.path||[r.from,r.to]).map(p=>`${p.x},${p.y}`).join(" ")} fill="none" stroke={r.mediumOk?CONN[r.medium].color:"#e2553f"} strokeWidth="26" strokeDasharray={r.via==="floor"?"60 42":"none"} strokeLinejoin="round" strokeLinecap="round" opacity=".9"/>
+      <circle cx={r.from.x} cy={r.from.y} r="42" fill={CONN[r.medium].color} stroke="#0e1116" strokeWidth="9"/>
     </g>)}
     {(zones||[]).map((z,i)=><g key={"z"+i}><rect x={z.x} y={z.y} width={z.w} height={z.h} fill="url(#nogo)" stroke="#e2553f" strokeWidth="16" strokeDasharray="70 50"/>
       <text x={z.x+z.w/2} y={z.y+z.h/2} fill="#b03a2e" fontSize="95" fontFamily="ui-monospace,Menlo,monospace" textAnchor="middle" dy="34">ne</text></g>)}
-    {cand.placed.filter(p=>p.kind!=="door").map((p,i)=><rect key={"s"+i} x={p.soft.x} y={p.soft.y} width={p.soft.w} height={p.soft.h} fill="url(#hh)" stroke="#d9a23b" strokeWidth="14" strokeDasharray="50 50" opacity=".8"/>)}
-    {cand.ev.overlaps.map((o,i)=>o.box&&<rect key={"o"+i} x={o.box.x} y={o.box.y} width={o.box.w} height={o.box.h} fill="#c0392b" opacity=".34"/>)}
-    {cand.placed.filter(p=>p.kind!=="door").map((p,i)=><rect key={"h"+i} x={p.hard.x} y={p.hard.y} width={p.hard.w} height={p.hard.h} fill="#e2553f" opacity=".14" stroke="#e2553f" strokeWidth="20"/>)}
-    {cand.placed.filter(p=>p.kind!=="door").map((p,i)=><g key={"f"+i}><rect x={p.foot.x} y={p.foot.y} width={p.foot.w} height={p.foot.h} rx="26" fill="#dfe6df" stroke="#2b3138" strokeWidth="30"/>
+    {layers.halo&&fixtures.map((p,i)=><rect key={"s"+i} x={p.soft.x} y={p.soft.y} width={p.soft.w} height={p.soft.h} fill="url(#hh)" stroke="#d9a23b" strokeWidth="14" strokeDasharray="50 50" opacity=".8"/>)}
+    {layers.halo&&cand.ev.overlaps.map((o,i)=>o.box&&<rect key={"o"+i} x={o.box.x} y={o.box.y} width={o.box.w} height={o.box.h} fill="#c0392b" opacity=".34"/>)}
+    {layers.cores&&fixtures.map((p,i)=><rect key={"h"+i} x={p.hard.x} y={p.hard.y} width={p.hard.w} height={p.hard.h} fill="#e2553f" opacity=".14" stroke="#e2553f" strokeWidth="20"/>)}
+    {layers.humans&&fixtures.map((p,i)=>{const hb=humanUsageBox(p);return hb&&<rect key={"hu"+i} x={hb.x} y={hb.y} width={hb.w} height={hb.h} fill="#5aa9e6" opacity=".18" stroke="#3a78b0" strokeWidth="16" strokeDasharray="46 34"/>;})}
+    {fixtures.filter(p=>isWin(p)?layers.windows:layers.equipment).map((p,i)=><g key={"f"+i}><rect x={p.foot.x} y={p.foot.y} width={p.foot.w} height={p.foot.h} rx="26" fill={isWin(p)?"#cfe8fb":"#dfe6df"} stroke={isWin(p)?"#3f86c9":"#2b3138"} strokeWidth="30"/>
       <text x={p.foot.x+p.foot.w/2} y={p.foot.y+p.foot.h/2} fill="#3a444f" fontSize="115" fontFamily="ui-sans-serif,system-ui" textAnchor="middle" dy="40">{p.name}</text></g>)}
-    {paths.map((pt,i)=>pt.reachable
+    {layers.paths&&paths.map((pt,i)=>pt.reachable
       ? <g key={"p"+i}>
           {/* želena širina = bled trak v ozadju (mehko, udobje) */}
           <polyline points={pt.path.map(p=>`${p.x},${p.y}`).join(" ")} fill="none" stroke="#5bbd8b" strokeWidth={bandWant} strokeLinecap="round" strokeLinejoin="round" opacity=".10"/>
@@ -788,11 +819,11 @@ function O2Plan({cand,cfg,zones,routing,paths=[],bandMin=600,bandWant=900}){ con
           <text x={pt.blockedAt.x} y={pt.blockedAt.y} dy="-108" fill="#b03a2e" fontSize="86" fontFamily="ui-sans-serif,system-ui" textAnchor="middle">{pt.name}: ni poti</text>
         </g>}</g>
     )}
-    {cand.placed.filter(p=>p.kind==="door").map((p,i)=><Door key={"d"+i} p={p} W={W} D={D}/>)}
+    {layers.doors&&cand.placed.filter(p=>p.kind==="door").map((p,i)=><Door key={"d"+i} p={p} W={W} D={D}/>)}
   </svg>;
 }
 
-function ThreeRoomView({cand,cfg,showHumans}){
+function ThreeRoomView({cand,cfg,routing,layers=DEFAULT_LAYERS}){
   const hostRef=useRef(null);
   useEffect(()=>{
     const host=hostRef.current;
@@ -842,21 +873,41 @@ function ThreeRoomView({cand,cfg,showHumans}){
     };
 
     addBox({x:0,y:0,z:-26,w:W,h:D,h3:26},mats.floor);
-    for(const wall of ["N","E","S","W"])addWall(group,wall,cfg,cand.placed,H,wallT,wall===wetWall?mats.wet:mats.wall);
+    if(layers.walls)for(const wall of ["N","E","S","W"])addWall(group,wall,cfg,cand.placed,H,wallT,wall===wetWall?mats.wet:mats.wall);
 
-    cand.placed.filter(p=>p.kind!=="door"&&p.el.kind!=="window").forEach((p)=>{
+    if(layers.equipment)cand.placed.filter(p=>p.kind!=="door"&&p.el.kind!=="window").forEach((p)=>{
       const mesh=addBox(elementBox(p),mats.fixture,true);
       if(mesh)mesh.name=p.name;
     });
 
-    cand.placed.filter(p=>p.el.kind==="window").forEach((p)=>addWindowPane(group,p,cfg,H,mats.glass));
-    cand.placed.filter(p=>p.kind==="door").forEach((p)=>addDoorSwing3D(group,p,cfg,mats.doorArc));
-    if(showHumans){
-      cand.placed.filter(p=>p.kind!=="door").forEach((p)=>{
-        const human=humanUsageBox(p);
-        if(human)addBox(human,mats.human,false);
-      });
-    }
+    if(layers.windows)cand.placed.filter(p=>p.el.kind==="window").forEach((p)=>addWindowPane(group,p,cfg,H,mats.glass));
+    if(layers.doors)cand.placed.filter(p=>p.kind==="door").forEach((p)=>addDoorSwing3D(group,p,cfg,mats.doorArc));
+    if(layers.humans)cand.placed.filter(p=>p.kind!=="door").forEach((p)=>{
+      const human=humanUsageBox(p);
+      if(human)addBox(human,mats.human,false);
+    });
+
+    // INSTALACIJE 3D — metodološko korektno: cev NE teče po zraku. Vodoravno gre
+    // po DEJANSKI trasi (route.path: po tleh za talne, ob steni/obodu za stenske)
+    // na ravni tal (FLOOR_RUN). Montažna VERTIKALA poveže višino priklopa
+    // (connectionZ — montaža na zid/element) s to ravnijo. Tako se upošteva
+    // višina montaže glede na tla in stene.
+    const FLOOR_RUN=40; // raven cevi tik nad ploščo (tla/estrih)
+    const elByName=new Map();
+    cand.placed.filter(p=>p.kind!=="door").forEach((p)=>{if(!elByName.has(p.name))elByName.set(p.name,p.el);});
+    (routing?.routes||[]).forEach((r)=>{
+      if(!layers[r.medium])return;
+      const el=elByName.get(r.fixtureName);
+      const z=el?connectionZ(el,r.connection):(r.connection.z??1000);
+      const path=r.path&&r.path.length?r.path:[r.from,r.to];
+      const mat=new THREE.LineBasicMaterial({color:new THREE.Color(CONN[r.medium].color)});
+      const pts=[
+        new THREE.Vector3(r.from.x-W/2,z,r.from.y-D/2),       // priklop na višini montaže
+        new THREE.Vector3(r.from.x-W/2,FLOOR_RUN,r.from.y-D/2), // vertikala do ravni tal
+      ];
+      for(const pt of path)pts.push(new THREE.Vector3(pt.x-W/2,FLOOR_RUN,pt.y-D/2)); // trasa po tleh/ob steni
+      group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),mat));
+    });
 
     const axes=new THREE.GridHelper(Math.max(W,D),Math.ceil(Math.max(W,D)/250),0xb9c0c7,0xd0d6dc);
     axes.position.y=1;
@@ -913,7 +964,7 @@ function ThreeRoomView({cand,cfg,showHumans}){
         }
       });
     };
-  },[cand,cfg,showHumans]);
+  },[cand,cfg,layers,routing]);
   return <div className="threeHost" ref={hostRef} aria-label="3D pogled prostora"/>;
 }
 
@@ -992,12 +1043,21 @@ function addDoorSwing3D(group,p,cfg,mat){
 }
 
 const WALL_LABELS={N:"S",E:"V",S:"J",W:"Z"};
-function ElevationView({cand,cfg,wall}){
+function ElevationView({cand,cfg,wall,routing,layers=DEFAULT_LAYERS}){
   const model=buildElevation(cand.placed,cfg,wall);
   const PADL=360,PADR=160,PADT=260,PADB=280;
   const WALL=120;
   const axis=model.width;
   const yOf=(r)=>model.height-r.y-r.h;
+  // INSTALACIJE v narisu — priklopi na tem zidu po višini z; gravitacijski odvod
+  // pokaže PADEC (vertikala od višine priklopa navzdol do tal/vertikale).
+  const inst=[];
+  cand.placed.filter(p=>p.kind!=="door"&&p.wall===wall).forEach(p=>{(p.el.conns||[]).forEach(c=>{
+    if(!layers[c.type])return;
+    const pt=placedConnectionPoint(p,c);
+    const along=(wall==="N"||wall==="S")?pt.x:pt.y;
+    inst.push({along,z:connectionZ(p.el,c),color:CONN[c.type].color,gravity:MEDIA_PROFILE[c.type].gravity});
+  });});
   const ticks=[];
   for(let z=0;z<=model.height;z+=500)ticks.push(z);
   if(ticks[ticks.length-1]!==model.height)ticks.push(model.height);
@@ -1005,7 +1065,7 @@ function ElevationView({cand,cfg,wall}){
   const strokeOf=(r)=>r.kind==="human"?"#3a78b0":r.kind==="window"?"#3f86c9":"#2b3138";
   return <svg viewBox={`${-PADL} ${-PADT} ${axis+PADL+PADR} ${model.height+PADT+PADB}`} style={{width:"100%",height:"100%"}}>
     <rect x={-PADL} y={-PADT} width={axis+PADL+PADR} height={model.height+PADT+PADB} fill="#f6f7f3"/>
-    <g>
+    {layers.walls&&<g>
       <rect x="0" y="0" width={axis} height={model.height} fill="#eef1ed" stroke="#2b3138" strokeWidth="16"/>
       <rect x={-WALL} y="0" width={WALL} height={model.height+WALL} fill="#d8ded7" stroke="#2b3138" strokeWidth="14"/>
       <rect x={axis} y="0" width={WALL} height={model.height+WALL} fill="#d8ded7" stroke="#2b3138" strokeWidth="14"/>
@@ -1013,7 +1073,7 @@ function ElevationView({cand,cfg,wall}){
       <rect x="0" y={-WALL} width={axis} height={WALL} fill="#d8ded7" stroke="#2b3138" strokeWidth="14"/>
       <line x1="0" y1="0" x2="0" y2={model.height} stroke="#7f8a96" strokeWidth="18"/>
       <line x1={axis} y1="0" x2={axis} y2={model.height} stroke="#7f8a96" strokeWidth="18"/>
-    </g>
+    </g>}
     <g fontFamily="ui-monospace,Menlo,monospace" fill="#8a96a3">
       <text x={axis/2} y={-126} fontSize="96" textAnchor="middle">Naris {WALL_LABELS[wall]} · vzdolž zidu / višina Z</text>
       <line x1="0" y1={model.height} x2={axis} y2={model.height} stroke="#2b3138" strokeWidth="18"/>
@@ -1026,7 +1086,7 @@ function ElevationView({cand,cfg,wall}){
       <text x="-188" y="-46" fontSize="76" textAnchor="end">mm</text>
       <text x={axis/2} y={model.height+146} fontSize="76" textAnchor="middle">{axis} mm</text>
     </g>
-    {model.rects.map(r=><g key={r.id}>
+    {model.rects.filter(r=>r.kind==="human"?layers.humans:r.kind==="window"?layers.windows:layers.equipment).map(r=><g key={r.id}>
       <rect x={r.x} y={yOf(r)} width={r.w} height={r.h} rx="16" fill={fillOf(r)} fillOpacity={r.kind==="human"?0.24:r.kind==="window"?0.36:0.95} stroke={strokeOf(r)} strokeWidth={r.kind==="human"?16:18} strokeDasharray={r.kind==="human"||r.kind==="window"?"52 36":"none"}/>
       {r.kind==="window"&&<line x1={r.x} y1={yOf(r)+r.h} x2={r.x+r.w} y2={yOf(r)+r.h} stroke="#3f86c9" strokeWidth="24"/>}
       <text x={r.x+r.w/2} y={yOf(r)+Math.min(r.h/2,130)} dy="32" fill={r.kind==="human"?"#2e6f9e":"#3a444f"} fontSize="78" fontFamily="ui-sans-serif,system-ui" textAnchor="middle">{r.kind==="human"?"človek":r.name}</text>
@@ -1036,7 +1096,17 @@ function ElevationView({cand,cfg,wall}){
       <rect x={r.x} y={model.height-r.y-r.h} width={r.w} height={r.h} fill="#c0392b" opacity=".48" stroke="#e2553f" strokeWidth="24"/>
       <text x={r.x+r.w/2} y={model.height-r.y-r.h-42} fill="#b03a2e" fontSize="64" fontFamily="ui-monospace,Menlo,monospace" textAnchor="middle">3D trk</text>
     </g>)}
-    {model.rects.length===0&&<text x={axis/2} y={model.height/2} fill="#7c8794" fontSize="86" fontFamily="ui-sans-serif,system-ui" textAnchor="middle">Na tem zidu ni elementov za naris.</text>}
+    {inst.map((u,i)=><g key={"i"+i}>
+      {u.gravity
+        ? <g>
+            <line x1={u.along} y1={model.height-u.z} x2={u.along} y2={model.height} stroke={u.color} strokeWidth="24" strokeDasharray="44 30"/>
+            <path d={`M${u.along-46} ${model.height-110} L${u.along} ${model.height} L${u.along+46} ${model.height-110}`} fill="none" stroke={u.color} strokeWidth="22" strokeLinejoin="round" strokeLinecap="round"/>
+            <text x={u.along+62} y={model.height-u.z/2} dy="24" fill={u.color} fontSize="62" fontFamily="ui-monospace,Menlo,monospace">padec {Math.round(u.z)}</text>
+          </g>
+        : <line x1={u.along-70} y1={model.height-u.z} x2={u.along+70} y2={model.height-u.z} stroke={u.color} strokeWidth="24"/>}
+      <circle cx={u.along} cy={model.height-u.z} r="36" fill={u.color} stroke="#0e1116" strokeWidth="9"/>
+    </g>)}
+    {model.rects.length===0&&inst.length===0&&<text x={axis/2} y={model.height/2} fill="#7c8794" fontSize="86" fontFamily="ui-sans-serif,system-ui" textAnchor="middle">Na tem zidu ni elementov za naris.</text>}
   </svg>;
 }
 
@@ -1101,8 +1171,15 @@ const CSS=`
 .viewTabs button.on{border-color:var(--cy);background:#0e2626;color:var(--cy)}
 .sceneTgl{height:30px;display:flex;align-items:center;gap:6px;padding:0 10px;border:1px solid var(--bd);border-radius:7px;color:var(--mut);font-size:11px;background:var(--panel)}
 .sceneTgl input{accent-color:var(--cy)}
-.sheet{flex:1;margin:0 16px;background:#f6f7f3;border-radius:11px;border:1px solid var(--bd);overflow:hidden;min-height:360px;touch-action:none;display:flex;align-items:center;justify-content:center}
+.sheet{flex:1;margin:0;background:#f6f7f3;border-radius:11px;border:1px solid var(--bd);overflow:hidden;min-height:360px;touch-action:none;display:flex;align-items:center;justify-content:center}
 .threeHost{width:100%;height:100%;min-height:360px;display:block;touch-action:none}
+.stageRow{flex:1;display:flex;gap:12px;margin:0 16px;min-height:360px}
+.daljinec{flex:none;width:172px;display:flex;flex-direction:column;gap:10px;overflow:auto}
+.layGroup{display:flex;flex-direction:column;gap:5px;background:var(--p2);border:1px solid var(--bd);border-radius:8px;padding:8px 9px}
+.layHd{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--tx);cursor:pointer;border-bottom:1px solid var(--bd);padding-bottom:6px}
+.layItem{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--mut);cursor:pointer}
+.layItem .medDot{width:10px;height:10px;border-radius:50%;flex:none}
+@media(max-width:760px){.stageRow{flex-direction:column}.daljinec{width:auto;flex-direction:row;flex-wrap:wrap}}
 .threeHost canvas{width:100%;height:100%;display:block}
 .abStage{gap:10px;padding-bottom:12px}.abProgress{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 16px;color:var(--mut);font-size:11px}
 .abProgress label{display:flex;align-items:center;gap:7px}.abProgress input{width:120px}.bestStrip{margin:0 16px;border:1px solid var(--bd);border-radius:8px;overflow:hidden;background:var(--panel)}

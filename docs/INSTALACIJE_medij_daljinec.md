@@ -32,3 +32,27 @@ razlog ob zavrnitvi in potrditev ob veljavni traso sta v desnem stolpcu (O5).
 Polni **naklonski model** gravitacijskega odvoda — troši višino (dolžina × naklon),
 omejena dolžina jaška, min. padec — NI implementiran. MVP preveri le: ne čez vrata +
 vertikala (mokri zid) v dosegu. Označeno v kodi (`model.ts`, `evaluator.ts`).
+
+## Daljinec — plasti prikaza (COMMIT 2)
+
+Ob strani načrta je **daljinec**: checkboxi za vklop/izklop plasti izrisa,
+grupirani po družinah (group checkbox vklopi/izklopi celo družino, posamezni
+sloji ostanejo neodvisni):
+
+- **Prostor:** stene, oprema, vrata, okna
+- **Pravila:** jedra, halo, poti, človeški kvadri
+- **Instalacije:** voda-odvod, voda-dovod, elektrika, zrak — vsak SVOJA BARVA
+
+**Privzeto (ob odprtju):** vklopljeni samo stene, oprema, vrata, okna. Vse ostalo
+izklopljeno; uporabnik prižge, kar hoče videti (npr. le voda-odvod + oprema).
+
+**KLJUČNO:** daljinec vpliva SAMO na izris — ne na engine, pravila ne rezultat.
+Routing/poti se vedno izračunajo; daljinec jih le (ne) nariše.
+
+Napeljava (vse 4 medije) se nariše v VSEH treh pogledih, ko je sloj vklopljen:
+- **tloris:** trasa po medijevi barvi
+- **naris:** PADEC odvoda (vertikala od višine priklopa navzdol) — tloris padca ne pokaže
+- **3D:** cev NE teče po zraku — vodoravno gre po **dejanski trasi** (po tleh za
+  talne, ob steni/obodu za stenske) na ravni tal; **montažna vertikala** poveže
+  višino priklopa (`connectionZ`) s to ravnijo, zato je upoštevana višina montaže
+  glede na tla in stene.
