@@ -40,8 +40,8 @@ export function induceRules(observations: ReferenceObservation[]): InducedRule[]
     const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
     const standardDeviation = Math.sqrt(variance);
     const conf = confidenceFromVariance(mean, standardDeviation);
-    const core = Math.round(percentile(values, conf >= 0.7 ? 0.2 : 0.1) / 10) * 10;
-    const halo = Math.round(percentile(values, 0.7) / 10) * 10;
+    const core = Math.min(...values);
+    const halo = Math.round(percentile(values, 0.5) / 10) * 10;
     const sat = Math.round(Math.max(percentile(values, 0.9), halo + 100) / 10) * 10;
 
     return {
