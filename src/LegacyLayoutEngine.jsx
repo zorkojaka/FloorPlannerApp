@@ -423,54 +423,81 @@ function O2({library}){
 
 /* ===== Korak 2 — omejitve sobe (leva polovica nekdanjega O2) ===== */
 function ConstraintsPanel({rp,library}){
-  const {W,setW,D,setD,wet,setWet,prog,setProg,setInst,soft,setSoft,allowFloorRoutes,setAllowFloorRoutes,zones,setZones,setZone,hasDoor,cornerEls,feasibility,setSeed,pathMin,setPathMin,pathWant,setPathWant,showPaths,setShowPaths}=rp;
+  const {W,setW,D,setD,wet,setWet,prog,setProg,setInst,soft,setSoft,allowFloorRoutes,setAllowFloorRoutes,zones,setZones,setZone,hasDoor,cornerEls,feasibility,setSeed,pathMin,setPathMin,pathWant,setPathWant,showPaths,setShowPaths,paths,comfort}=rp;
+  const openings=prog.filter(p=>{const e=library[p.key];return e&&(isDoor(e)||e.kind==="window");});
+  const equipment=prog.filter(p=>{const e=library[p.key];return e&&!isDoor(e)&&e.kind!=="window";});
+  const addProgram=(key)=>setProg(p=>[...p,{id:uid(),key,...(isDoor(library[key])?{w:800,dir:"auto",wall:"auto",hinge:"auto"}:{})}]);
+  const renderItem=(p)=>{const e=library[p.key];const door=isDoor(e);
+    return <div key={p.id} className={"pItem "+(door?"door":"")}>
+      <div className="pTop"><span>{e.name}{door?` (${p.w})`:""}</span><button onClick={()=>setProg(P=>P.filter(x=>x.id!==p.id))}>×</button></div>
+      {door && <div className="dCfg">
+        <div className="dRow"><span>širina</span><div className="rt3">{[700,800,900].map(w=><button key={w} className={p.w===w?"on":""} onClick={()=>setInst(p.id,{w})}>{w}</button>)}</div></div>
+        <div className="dRow"><span>smer</span><div className="rt3">{[["auto","auto"],["inward","Noter"],["outward","Ven"]].map(([v,l])=><button key={v} className={p.dir===v?"on":""} onClick={()=>setInst(p.id,{dir:v})}>{l}</button>)}</div></div>
+        <div className="dRow"><span>tečaj</span><div className="rt3">{[["auto","auto"],[0,"Levo"],[1,"Desno"]].map(([v,l])=><button key={String(v)} className={p.hinge===v?"on":""} onClick={()=>setInst(p.id,{hinge:v})}>{l}</button>)}</div></div>
+        <div className="dRow"><span>zid</span><div className="rt3 wrap">{[["auto","auto"],["N","S"],["E","V"],["S","J"],["W","Z"]].map(([v,l])=><button key={v} className={p.wall===v?"on":""} onClick={()=>setInst(p.id,{wall:v})}>{l}</button>)}</div></div>
+        <div className="dRow"><span>poz.</span><div className="rt3"><button className={p.fixedPos?"on":""} onClick={()=>setInst(p.id,{fixedPos:!p.fixedPos})}>{p.fixedPos?"fiksna":"prosta"}</button></div></div>
+        {p.fixedPos && <input type="range" min="0" max="1" step="0.02" value={p.fpos??0.5} onChange={e=>setInst(p.id,{fpos:+e.target.value})} style={{width:"100%",marginTop:2,accentColor:"#5aa9e6"}}/>}
+      </div>}
+    </div>;
+  };
   return (
-    <aside className="col">
-      <div className="eyebrow">Prostor</div>
-      <Num label="Širina" v={W} set={setW} min={1200} max={5000} step={50}/>
-      <Num label="Globina" v={D} set={setD} min={1400} max={5000} step={50}/>
-      <div className="wp"><span>Mokri zid</span><div className="rt wgrid">{["N","E","S","W"].map(w=><button key={w} className={wet===w?"on":""} onClick={()=>setWet(w)}>{({N:"sever",E:"vzhod",S:"jug",W:"zahod"})[w]}</button>)}</div></div>
-      <div className="eyebrow mt">Program</div>
-      <div className="addRow">{Object.entries(library).map(([k,e])=><button key={k} onClick={()=>setProg(p=>[...p,{id:uid(),key:k,...(isDoor(e)?{w:800,dir:"auto",wall:"auto",hinge:"auto"}:{})}])}>+ {e.name}</button>)}</div>
-      <div className="progList">{prog.map(p=>{const e=library[p.key];const door=isDoor(e);
-        return <div key={p.id} className={"pItem "+(door?"door":"")}>
-          <div className="pTop"><span>{e.name}{door?` (${p.w})`:""}</span><button onClick={()=>setProg(P=>P.filter(x=>x.id!==p.id))}>×</button></div>
-          {door && <div className="dCfg">
-            <div className="dRow"><span>širina</span><div className="rt3">{[700,800,900].map(w=><button key={w} className={p.w===w?"on":""} onClick={()=>setInst(p.id,{w})}>{w}</button>)}</div></div>
-            <div className="dRow"><span>smer</span><div className="rt3">{[["auto","auto"],["inward","Noter"],["outward","Ven"]].map(([v,l])=><button key={v} className={p.dir===v?"on":""} onClick={()=>setInst(p.id,{dir:v})}>{l}</button>)}</div></div>
-            <div className="dRow"><span>tečaj</span><div className="rt3">{[["auto","auto"],[0,"Levo"],[1,"Desno"]].map(([v,l])=><button key={String(v)} className={p.hinge===v?"on":""} onClick={()=>setInst(p.id,{hinge:v})}>{l}</button>)}</div></div>
-            <div className="dRow"><span>zid</span><div className="rt3 wrap">{[["auto","auto"],["N","S"],["E","V"],["S","J"],["W","Z"]].map(([v,l])=><button key={v} className={p.wall===v?"on":""} onClick={()=>setInst(p.id,{wall:v})}>{l}</button>)}</div></div>
-            <div className="dRow"><span>poz.</span><div className="rt3"><button className={p.fixedPos?"on":""} onClick={()=>setInst(p.id,{fixedPos:!p.fixedPos})}>{p.fixedPos?"fiksna":"prosta"}</button></div></div>
-            {p.fixedPos && <input type="range" min="0" max="1" step="0.02" value={p.fpos??0.5} onChange={e=>setInst(p.id,{fpos:+e.target.value})} style={{width:"100%",marginTop:2,accentColor:"#5aa9e6"}}/>}
-          </div>}
-        </div>;})}</div>
-      {!hasDoor && <div className="warnNote">⚠ Soba rabi vsaj ena vrata. Dodaj jih, sicer ni veljavne rešitve.</div>}
-      {cornerEls.length>0 && <div className="warnNote">Kotni elementi rabijo vogalno postavitev - pride kasneje.</div>}
-      {!feasibility.feasible && <div className="warnNote"><b>Predhodna izvedljivost</b><br/>{feasibility.reasons.map((r,i)=><span key={i}>{r}<br/></span>)}</div>}
-      <div className="eyebrow mt">Realne omejitve sobe</div>
-      <button className="add" onClick={()=>setZones(z=>[...z,{id:uid(),x:Math.round(W*0.4),y:Math.round(D*0.35),w:600,h:600}])}>+ prepovedana cona</button>
-      {zones.map(z=>(
-        <div key={z.id} className="zone">
-          <div className="zTop"><span>prepovedana cona</span><button onClick={()=>setZones(Z=>Z.filter(x=>x.id!==z.id))}>×</button></div>
-          <div className="zGrid">
-            <ZNum label="x" v={z.x} set={v=>setZone(z.id,{x:v})} max={W}/>
-            <ZNum label="y" v={z.y} set={v=>setZone(z.id,{y:v})} max={D}/>
-            <ZNum label="š" v={z.w} set={v=>setZone(z.id,{w:v})} max={W}/>
-            <ZNum label="g" v={z.h} set={v=>setZone(z.id,{h:v})} max={D}/>
+    <aside className="constraints2">
+      <div className="col inputCol">
+        <div className="eyebrow">Prostor</div>
+        <Num label="Širina" v={W} set={setW} min={1200} max={5000} step={50}/>
+        <Num label="Globina" v={D} set={setD} min={1400} max={5000} step={50}/>
+        <div className="wp"><span>Mokri zid</span><div className="rt wgrid">{["N","E","S","W"].map(w=><button key={w} className={wet===w?"on":""} onClick={()=>setWet(w)}>{({N:"sever",E:"vzhod",S:"jug",W:"zahod"})[w]}</button>)}</div></div>
+
+        <div className="eyebrow mt">Vrata in okna</div>
+        <div className="addRow">{Object.entries(library).filter(([,e])=>isDoor(e)||e.kind==="window").map(([k,e])=><button key={k} onClick={()=>addProgram(k)}>+ {e.name}</button>)}</div>
+        <div className="progList">{openings.map(renderItem)}</div>
+        {!hasDoor && <div className="warnNote">⚠ Soba rabi vsaj ena vrata. Dodaj jih, sicer ni veljavne rešitve.</div>}
+
+        <div className="eyebrow mt">Program opreme</div>
+        <div className="addRow">{Object.entries(library).filter(([,e])=>!isDoor(e)&&e.kind!=="window").map(([k,e])=><button key={k} onClick={()=>addProgram(k)}>+ {e.name}</button>)}</div>
+        <div className="progList">{equipment.map(renderItem)}</div>
+        {cornerEls.length>0 && <div className="warnNote">Kotni elementi rabijo vogalno postavitev - pride kasneje.</div>}
+        {!feasibility.feasible && <div className="warnNote"><b>Predhodna izvedljivost</b><br/>{feasibility.reasons.map((r,i)=><span key={i}>{r}<br/></span>)}</div>}
+
+        <div className="eyebrow mt">Realne omejitve sobe</div>
+        <button className="add" onClick={()=>setZones(z=>[...z,{id:uid(),x:Math.round(W*0.4),y:Math.round(D*0.35),w:600,h:600}])}>+ prepovedana cona</button>
+        {zones.map(z=>(
+          <div key={z.id} className="zone">
+            <div className="zTop"><span>prepovedana cona</span><button onClick={()=>setZones(Z=>Z.filter(x=>x.id!==z.id))}>×</button></div>
+            <div className="zGrid">
+              <ZNum label="x" v={z.x} set={v=>setZone(z.id,{x:v})} max={W}/>
+              <ZNum label="y" v={z.y} set={v=>setZone(z.id,{y:v})} max={D}/>
+              <ZNum label="š" v={z.w} set={v=>setZone(z.id,{w:v})} max={W}/>
+              <ZNum label="g" v={z.h} set={v=>setZone(z.id,{h:v})} max={D}/>
+            </div>
           </div>
-        </div>
-      ))}
-      <div className="ifaceNote">Vmesnik omejitev: zdaj jih vnašaš ti (steber, okno, obstoječa vrata). Kasneje jih engine za razporeditev sob napolni sam - kje so vrata, koliko m².</div>
-      <label className="softTgl"><input type="checkbox" checked={soft} onChange={e=>setSoft(e.target.checked)}/> <span>Mehka pravila: halo se sme upogniti</span></label>
-      <div className="softNote">{soft?"Halo se sme prekriti (kazen). Lok vrat ostane TRDO pravilo - vanj nikoli.":"Strogo: vsako prekrivanje halo = zavrnitev."}</div>
-      <label className="softTgl"><input type="checkbox" checked={allowFloorRoutes} onChange={e=>setAllowFloorRoutes(e.target.checked)}/> <span>O5: talne trase dovoljene</span></label>
-      <div className="softNote">{allowFloorRoutes?"Priklopi, ki vodijo v tla, se trasirajo naravnost po plošči.":"Priklopi v tla se preusmerijo po steni (obodu) do mokrega zidu - daljša trasa, brez prebijanja plošče."}</div>
-      <div className="eyebrow mt">Širina poti</div>
-      <Num label="Minimalna (trdo)" v={pathMin} set={setPathMin} min={300} max={2400} step={50} c="#e2553f"/>
-      <Num label="Želena (mehko)" v={pathWant} set={setPathWant} min={300} max={3000} step={50} c="#5bbd8b"/>
-      <div className="softNote">Pot je trak te širine. <b style={{color:"#e2553f"}}>Minimalna</b> je trda: pod njo razporeditev ni veljavna. <b style={{color:"#5bbd8b"}}>Želena</b> je mehka: udobje/srečanje, vpliva le na oceno. (Obračanje viličarja/radij je odloženo za proizvodno domeno.)</div>
-      <label className="softTgl"><input type="checkbox" checked={showPaths} onChange={e=>setShowPaths(e.target.checked)}/> <span>Pokaži poti (vrata → element)</span></label>
-      <button className="regen" onClick={()=>setSeed(s=>s+1)}>↻ Generiraj</button>
+        ))}
+        <div className="ifaceNote">Vmesnik omejitev: zdaj jih vnašaš ti (steber, okno, obstoječa vrata). Kasneje jih engine za razporeditev sob napolni sam - kje so vrata, koliko m².</div>
+      </div>
+      <div className="col controlCol">
+        <Section k="input-paths" title="Pregled poti">
+          <label className="softTgl"><input type="checkbox" checked={showPaths} onChange={e=>setShowPaths(e.target.checked)}/> <span>Pokaži poti (vrata → element)</span></label>
+          {paths.length>0 ? <div className="routeList">{paths.map((pt,i)=><div key={i} className="routeItem">
+            <span>{pt.name} · {pt.reachable?(pt.minWidth>=pathWant?"udobno":"ozko"):"NI POTI"}</span>
+            <b className="mono">{pt.reachable?Math.round(pt.minWidth)+" mm":"blok"}</b>
+          </div>)}</div> : <div className="soft2 none">Poti se pokažejo po veljavni generaciji.</div>}
+        </Section>
+        <Section k="input-widths" title="Širina poti">
+          <Num label="Minimalna (trdo)" v={pathMin} set={setPathMin} min={300} max={2400} step={50} c="#e2553f"/>
+          <Num label="Želena (mehko)" v={pathWant} set={setPathWant} min={300} max={3000} step={50} c="#5bbd8b"/>
+          {comfort&&<div className="softNote">Trenutno: najožja <b className="mono">{Math.round(comfort.minWidth)}</b> mm · udobje <b className="mono">{Math.round(comfort.ratio*100)}</b>.</div>}
+          <div className="softNote">Minimalna je trda; želena je mehka in vpliva le na oceno udobja.</div>
+        </Section>
+        <Section k="input-floor" title="Talne trase">
+          <label className="softTgl"><input type="checkbox" checked={allowFloorRoutes} onChange={e=>setAllowFloorRoutes(e.target.checked)}/> <span>O5: talne trase dovoljene</span></label>
+          <div className="softNote">{allowFloorRoutes?"Priklopi, ki vodijo v tla, se trasirajo naravnost po plošči.":"Priklopi v tla se preusmerijo po steni do mokrega zidu."}</div>
+        </Section>
+        <Section k="input-soft" title="Mehka pravila">
+          <label className="softTgl"><input type="checkbox" checked={soft} onChange={e=>setSoft(e.target.checked)}/> <span>Halo se sme upogniti</span></label>
+          <div className="softNote">{soft?"Halo se sme prekriti s kaznijo. Lok vrat ostane trdo pravilo.":"Strogo: vsako prekrivanje halo zavrne kandidat."}</div>
+        </Section>
+        <button className="regen" onClick={()=>setSeed(s=>s+1)}>↻ Generiraj</button>
+      </div>
     </aside>
   );
 }
@@ -939,6 +966,9 @@ const CSS=`
 
 .grid3{display:grid;grid-template-columns:230px 1fr 256px;gap:1px;background:var(--bd)}
 @media(max-width:1080px){.grid3{grid-template-columns:1fr}}
+.constraints2{display:grid;grid-template-columns:minmax(300px,1.15fr) minmax(260px,.85fr);gap:1px;background:var(--bd)}
+.constraints2 .col{min-width:0}.controlCol .sec{margin-bottom:8px}.controlCol .secHd{padding:10px 0}.controlCol .secBody{padding:0 0 10px}
+@media(max-width:1180px){.constraints2{grid-template-columns:1fr}}
 .elementCards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px;background:var(--bd);padding:1px;margin-bottom:1px}
 .elementCard{min-height:104px;display:grid;grid-template-columns:72px 1fr auto;grid-template-rows:auto 1fr;gap:6px 9px;align-items:center;text-align:left;background:var(--panel);border:1px solid transparent;color:var(--tx);padding:9px;border-radius:8px;cursor:pointer}
 .elementCard.on{border-color:var(--cy);background:#0e2626}.elementCard .src{justify-self:end}.elementMini{width:72px;height:62px;grid-row:1/3;background:#f6f7f3;border-radius:6px}
