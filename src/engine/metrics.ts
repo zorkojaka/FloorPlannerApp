@@ -1,6 +1,7 @@
 import type { PreferenceState } from './preference';
 import type { ReferenceObservation } from '../rules/induction';
 import { induceRules } from '../rules/induction';
+import { measureLeaveOneOutHoldout } from '../rules/inductionEvaluation';
 
 export interface InductionMetric {
   trainCount: number;
@@ -20,25 +21,13 @@ export function measureInductionHoldout(observations: ReferenceObservation[]): I
     return { trainCount: observations.length, holdoutCount: 0, meanAbsoluteError: 0, score: 0 };
   }
 
-  const split = Math.max(1, Math.floor(observations.length * 0.67));
-  const train = observations.slice(0, split);
-  const holdout = observations.slice(split);
-  const rules = induceRules(train);
-  const errors: number[] = [];
-
-  for (const item of holdout) {
-    const rule = rules.find((candidate) => candidate.elementKey === item.elementKey && candidate.parameter === item.parameter);
-    if (!rule) continue;
-    errors.push(Math.abs(rule.envelope.halo - item.value));
-  }
-
-  const meanAbsoluteError = errors.length ? errors.reduce((sum, value) => sum + value, 0) / errors.length : 0;
-  const score = errors.length ? Math.max(0, Math.min(1, 1 - meanAbsoluteError / 1000)) : 0;
+  const report = measureLeaveOneOutHoldout(observations);
+  const score = report.holdoutCount ? report.insideCount / report.holdoutCount : 0;
 
   return {
-    trainCount: train.length,
-    holdoutCount: holdout.length,
-    meanAbsoluteError,
+    trainCount: observations.length - 1,
+    holdoutCount: report.holdoutCount,
+    meanAbsoluteError: report.meanHaloOffset,
     score,
   };
 }

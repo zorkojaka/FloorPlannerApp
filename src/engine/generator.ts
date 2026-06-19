@@ -21,6 +21,8 @@ export interface GenerateLayoutOptions {
   soft: boolean;
   zones?: NoGoZone[];
   samples?: number;
+  limit?: number;
+  random?: () => number;
   minPathWidth?: number; // minimalna širina poti (trdo): pod njo razporeditev ni veljavna
 }
 
@@ -34,6 +36,8 @@ export function generateLayoutPool({
   zones = [],
   samples = 1100,
   minPathWidth,
+  limit = 40,
+  random = Math.random,
 }: GenerateLayoutOptions): LayoutCandidate[] {
   if (!checkFeasibility(library, program, cfg, zones).feasible) return [];
 
@@ -52,7 +56,7 @@ export function generateLayoutPool({
     for (const instance of instances) {
       const element = instance.el;
       if (isDoor(element)) {
-        const wall = instance.wall && instance.wall !== 'auto' ? instance.wall : WALLS[Math.floor(Math.random() * 4)];
+        const wall = instance.wall && instance.wall !== 'auto' ? instance.wall : WALLS[Math.floor(random() * 4)];
         const wallLength = wall === 'N' || wall === 'S' ? cfg.W : cfg.D;
         const width = instance.w || element.w;
         const span = wallLength - width;
@@ -61,19 +65,19 @@ export function generateLayoutPool({
           break;
         }
 
-        const pos = instance.fixedPos ? clamp((instance.fpos ?? 0.5) * span, 0, span) : Math.random() * span;
-        const hinge = instance.hinge !== 'auto' && instance.hinge !== undefined ? instance.hinge : Math.random() < 0.5 ? 0 : 1;
-        const dir = instance.dir && instance.dir !== 'auto' ? instance.dir : Math.random() < 0.5 ? 'inward' : 'outward';
+        const pos = instance.fixedPos ? clamp((instance.fpos ?? 0.5) * span, 0, span) : random() * span;
+        const hinge = instance.hinge !== 'auto' && instance.hinge !== undefined ? instance.hinge : random() < 0.5 ? 0 : 1;
+        const dir = instance.dir && instance.dir !== 'auto' ? instance.dir : random() < 0.5 ? 'inward' : 'outward';
         const rects = doorRects({ ...element, w: width }, wall, pos, hinge, dir, cfg.W, cfg.D);
         placed.push({ ...rects, el: element, wall, name: element.name });
       } else {
-        const wall = WALLS[Math.floor(Math.random() * 4)];
+        const wall = WALLS[Math.floor(random() * 4)];
         const wallLength = wall === 'N' || wall === 'S' ? cfg.W : cfg.D;
         if (wallLength < element.w) {
           ok = false;
           break;
         }
-        const pos = Math.random() * (wallLength - element.w);
+        const pos = random() * (wallLength - element.w);
         const rects = placeRects(element, wall, pos, cfg.W, cfg.D);
         placed.push({ ...rects, el: element, wall, name: element.name });
       }
@@ -98,5 +102,5 @@ export function generateLayoutPool({
   }
 
   unique.sort((a, b) => b.ev.score - a.ev.score);
-  return unique.slice(0, 40);
+  return unique.slice(0, limit);
 }
