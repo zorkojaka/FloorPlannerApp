@@ -558,7 +558,7 @@ function ConstraintsPanel({rp,library}){
 
 /* ===== Korak 3 (a) — oder z razporeditvijo in poolom ===== */
 function ABStagePanel({rp}){
-  const {best,cfg,zones,optionA,optionB,abPair,choosePreference,chooseEqualPreference,chooseChampionStays,pref,championKey,championEvents,explore,setExplore,pathMin,pathWant,pool,idx,setIdx,allowFloorRoutes}=rp;
+  const {best,cfg,zones,optionA,optionB,abPair,choosePreference,chooseEqualPreference,chooseChampionStays,pref,channels,championKey,championEvents,explore,setExplore,pathMin,pathWant,pool,idx,setIdx,allowFloorRoutes}=rp;
   const routeOf=(cand)=>cand?routeServices(cand.placed,cfg,{allowFloorRoutes}):null;
   const aIsChampion=optionA&&candidateKey(optionA)===championKey;
   const bIsChampion=optionB&&candidateKey(optionB)===championKey;
@@ -572,11 +572,14 @@ function ABStagePanel({rp}){
     ["vmes",abPair?.mode||"-"],
     ["raziskovanje","največji informacijski donos"],
   ];
+  const learnedDrain=channels.find(ch=>ch.id==="drain-distance")?.learned??0;
+  const learnedPath=channels.find(ch=>ch.id==="path-comfort")?.learned??0;
   return <main className="cstage abStage">
     <div className="abProgress">
       <span>Primerjave <b className="mono">{pref.comparisons}</b></span>
       <span className={changes===0&&recent.length>=3?"conv on":"conv"}>{recent.length<3?"še zbiramo":changes===0?"prvak drži":`prvak se menja ${changes}/${recent.length}`}</span>
       <span>{abPair?.mode||"par"} · donos <b className="mono">{abPair?Math.round(abPair.info*100):0}</b></span>
+      <span>learned: trase <b className="mono">{(learnedDrain*100).toFixed(1)}</b> · poti <b className="mono">{(learnedPath*100).toFixed(1)}</b></span>
       <label>raziskovanje <b className="mono">{Math.round(explore*100)}</b><input type="range" min="0" max="1" step="0.05" value={explore} onInput={e=>setExplore(+e.target.value)} onChange={e=>setExplore(+e.target.value)}/></label>
       <button className="microBtn" onClick={()=>setExplore(0)}>izkoriščaj</button>
       <button className="microBtn" onClick={()=>setExplore(1)}>raziskuj</button>
