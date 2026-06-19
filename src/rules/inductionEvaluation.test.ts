@@ -63,11 +63,13 @@ describe('induction holdout measurement', () => {
     expect(generous.rules.find((rule) => rule.elementKey === 'toilet')!.envelope.halo).toBeGreaterThan(
       baseline.rules.find((rule) => rule.elementKey === 'toilet')!.envelope.halo,
     );
-    expect(baseline.validCount).toBe(65);
-    expect(generous.validCount).toBe(64);
+    // medij-pravilo (gravitacijski odvod ne čez vrata) izloči nekaj prej veljavnih
+    // razporeditev → nižji validCount; aisle/penalty se ustrezno premakneta
+    expect(baseline.validCount).toBe(47);
+    expect(generous.validCount).toBe(46);
     expect(baseline.bestAisle).toBe(950);
     expect(generous.bestAisle).toBe(800);
-    expect(baseline.meanHaloPenalty).toBeCloseTo(225.83, 2);
+    expect(baseline.meanHaloPenalty).toBeCloseTo(312.31, 2);
     expect(generous.meanHaloPenalty).toBe(0);
   });
 });

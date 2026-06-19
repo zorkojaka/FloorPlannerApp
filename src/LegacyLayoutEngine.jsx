@@ -2,7 +2,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { baseLib } from "./elements/library";
-import { CONNECTION_META as CONN, SIDE_LABELS as SIDES, isDoor, orientation, serviceSides } from "./elements/model";
+import { CONNECTION_META as CONN, SIDE_LABELS as SIDES, MEDIA_PROFILE, connectionZ, isDoor, orientation, serviceSides } from "./elements/model";
 import { connectionPoint as connXY, nearestEdge, wallEdge, doorSwing } from "./engine/geometry";
 import { generateLayoutPool } from "./engine/generator";
 import { routeServices } from "./engine/routing";
@@ -327,6 +327,8 @@ function O1({library,setLibrary}){
               <button className="del" onClick={ev=>{ev.stopPropagation();patch(el=>el.conns=el.conns.filter(x=>x.id!==c.id));}}>×</button></div>
             <div className="connRow"><span className="lbl">stran</span><div className="sideBtns">{Object.entries(SIDES).map(([k,v])=><button key={k} className={c.side===k?"on":""} onClick={()=>patch(el=>el.conns.find(x=>x.id===c.id).side=k)}>{v}</button>)}</div></div>
             <div className="connRow"><span className="lbl">vodi v</span><div className="rt"><button className={c.routesTo==="wall"?"on":""} onClick={()=>patch(el=>el.conns.find(x=>x.id===c.id).routesTo="wall")}>zid</button><button className={c.routesTo==="floor"?"on":""} onClick={()=>patch(el=>el.conns.find(x=>x.id===c.id).routesTo="floor")}>tla</button></div></div>
+            <div className="connRow"><span className="lbl">višina z</span><input className="zrange" type="range" min="0" max={Math.max(el.h||2000,500)} step="10" value={connectionZ(el,c)} onChange={e=>patch(el=>{el.conns.find(x=>x.id===c.id).z=+e.target.value;})}/><b className="mono">{connectionZ(el,c)}{c.z===undefined?" (sredina)":""}</b></div>
+            <div className={"mediaRule "+(MEDIA_PROFILE[c.type].gravity?"grav":"free")}>{MEDIA_PROFILE[c.type].gravity?"⬇ ":"→ "}{MEDIA_PROFILE[c.type].rule}</div>
           </div>))}
         <button className="add" onClick={()=>patch(el=>el.conns.push({id:uid(),type:"electric",side:"back",off:0.5,routesTo:"wall"}))}>+ priklop</button>
         <div className="eyebrow mt">Clearance envelope</div>
@@ -669,9 +671,9 @@ function ReviewPanel({rp,showAB=true,showBench=true}){
           <div className="drain"><span className="mono">{((routing?.totalLength||0)/1000).toFixed(2)} m</span> skupne trase<br/><i>O5 računa od dejanske priklopne točke</i></div>
           {routing?.reroutedCount>0 && <div className="warnNote">{routing.reroutedCount} priklopov v tla je preusmerjenih po steni (talne trase niso dovoljene).</div>}
           {routing?.floorCrossingCount>0 && <div className="warnNote">{routing.floorCrossingCount} talnih tras ima križanje.</div>}
-          <div className="routeList">{routing?.routes.map(r=><div key={r.id} className={"routeItem "+r.via}>
-            <span>{r.fixtureName} · {CONN[r.connection.type].short} · {r.via==="floor"?"tla":r.rerouted?"zid (preusmerjeno)":"zid"}</span>
-            <b className="mono">{(r.length/1000).toFixed(2)} m</b>
+          <div className="routeList">{routing?.routes.map(r=><div key={r.id} className={"routeItem "+r.via} style={r.mediumOk?{}:{borderColor:"#7a3028"}}>
+            <div className="routeTop"><span><i className="medDot" style={{background:CONN[r.medium].color}}/>{r.fixtureName} · {MEDIA_PROFILE[r.medium].label}</span><b className="mono">{(r.length/1000).toFixed(2)} m</b></div>
+            <div className="medNote" style={r.mediumOk?{color:"#6f9f86"}:{color:"#f08a78"}}>{r.mediumOk?"✓ ":"✗ "}{r.mediumNote}</div>
           </div>)}</div>
         </Section>
         <Section k="paths" title={<>Poti · trak <span className="mono">{pathMin}</span>/<span className="mono">{pathWant}</span> mm</>}>
@@ -1156,9 +1158,16 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .soft2 .mono{color:var(--mut)}
 .drain{font-size:11.5px;line-height:1.5;color:var(--tx)}.drain .mono{color:var(--cy);font-size:14px}.drain i{color:var(--mut);font-size:10.5px}
 .routeList{display:flex;flex-direction:column;gap:6px;margin-top:10px}
-.routeItem{display:flex;justify-content:space-between;gap:8px;align-items:center;background:var(--p2);border:1px solid var(--bd);border-radius:7px;padding:8px 9px;font-size:11px;color:var(--tx)}
+.routeItem{display:flex;flex-direction:column;gap:4px;background:var(--p2);border:1px solid var(--bd);border-radius:7px;padding:8px 9px;font-size:11px;color:var(--tx)}
 .routeItem.wall{border-color:#244662}.routeItem.floor{border-color:#5a4420}.routeItem.blocked{border-color:#7a3028;color:#f08a78}
 .routeItem b{color:var(--cy);font-size:10.5px;white-space:nowrap}
+.routeTop{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.medDot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.medNote{font-size:10px;line-height:1.35}
+.mediaRule{font-size:10px;line-height:1.4;border-radius:6px;padding:6px 8px;margin-top:6px}
+.mediaRule.grav{background:#0e1e2e;border:1px solid #234a63;color:#7fb8e6}
+.mediaRule.free{background:#16201a;border:1px solid #2a4a36;color:#7fcaa0}
+.zrange{flex:1;accent-color:#16b3b3;height:3px}
 .abBox{background:var(--p2);border:1px solid var(--bd);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:8px}
 .abBtns{display:grid;grid-template-columns:1fr 1fr;gap:7px}.abBtns button{border:1px solid var(--bd);background:var(--bg);color:var(--tx);border-radius:7px;padding:8px;cursor:pointer;font-size:12px}.abBtns button:hover{border-color:var(--cy);color:var(--cy)}
 .prefBars{display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:10.5px;color:var(--mut)}.prefBars span{background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:6px}.prefBars b{color:var(--cy);float:right}

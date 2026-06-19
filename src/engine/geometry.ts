@@ -150,6 +150,26 @@ export function doorRects(
   };
 }
 
+// Ali daljica (a→b) seka pravokotnik (npr. trasa odvoda čez odprtino vrat).
+export function segmentIntersectsRect(a: Point, b: Point, rect: Rect): boolean {
+  const inside = (p: Point) => p.x >= rect.x && p.x <= rect.x + rect.w && p.y >= rect.y && p.y <= rect.y + rect.h;
+  if (inside(a) || inside(b)) return true;
+  const r = { x1: rect.x, y1: rect.y, x2: rect.x + rect.w, y2: rect.y + rect.h };
+  const edges: [Point, Point][] = [
+    [{ x: r.x1, y: r.y1 }, { x: r.x2, y: r.y1 }],
+    [{ x: r.x2, y: r.y1 }, { x: r.x2, y: r.y2 }],
+    [{ x: r.x2, y: r.y2 }, { x: r.x1, y: r.y2 }],
+    [{ x: r.x1, y: r.y2 }, { x: r.x1, y: r.y1 }],
+  ];
+  return edges.some(([c, d]) => segmentsCross(a, b, c, d));
+}
+
+function segmentsCross(a: Point, b: Point, c: Point, d: Point): boolean {
+  const o = (p: Point, q: Point, r: Point) => Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x));
+  const o1 = o(a, b, c), o2 = o(a, b, d), o3 = o(c, d, a), o4 = o(c, d, b);
+  return o1 !== o2 && o3 !== o4;
+}
+
 export function overlapArea(a: Rect, b: Rect): number {
   const x = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
   const y = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));

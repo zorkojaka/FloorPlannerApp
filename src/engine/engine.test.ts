@@ -706,6 +706,40 @@ describe('test-bench wiring (ablacija + prior/learned)', () => {
   });
 });
 
+describe('medij priklopa — gravitacijski odvod ne sme čez vrata', () => {
+  const cfg = { W: 2000, D: 2000, wetWall: 'S' as const, minAisle: 600 };
+  function scene(connType: 'water-out' | 'water-in'): PlacedElement[] {
+    const lib = baseLib();
+    const toilet = { ...lib.toilet, conns: lib.toilet.conns.map((c) => (c.type === 'water-out' ? { ...c, type: connType } : c)) };
+    const door = doorRects(lib.door, 'S', 700, 0, 'outward', cfg.W, cfg.D);
+    const t = placeRects(toilet, 'N', 800, cfg.W, cfg.D);
+    return [
+      { ...door, el: lib.door, name: 'Vrata' },
+      { ...t, el: toilet, wall: 'N', name: 'WC' },
+    ];
+  }
+
+  it('odvod čez odprtino vrat → neveljaven z razlago', () => {
+    const ev = evalPlace(scene('water-out'), cfg, true);
+    expect(ev.viol.some((v) => v.startsWith('odvod') && v.includes('prag vrat'))).toBe(true);
+  });
+
+  it('tlačni dovod po isti poti → brez medij-kršitve (sme čez)', () => {
+    const ev = evalPlace(scene('water-in'), cfg, true);
+    expect(ev.viol.some((v) => v.startsWith('odvod'))).toBe(false);
+  });
+
+  it('routeServices označi medij in razlog (steklena škatla)', () => {
+    const drain = routeServices(scene('water-out'), cfg).routes.find((r) => r.medium === 'water-out');
+    expect(drain).toBeTruthy();
+    expect(drain!.mediumOk).toBe(false);
+    expect(drain!.mediumNote).toContain('prag vrat');
+
+    const supply = routeServices(scene('water-in'), cfg).routes.find((r) => r.medium === 'water-out');
+    expect(supply).toBeUndefined(); // ni več odvoda
+  });
+});
+
 function memoryStorage(): JsonStorage {
   const values = new Map<string, string>();
   return {

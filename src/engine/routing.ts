@@ -1,7 +1,9 @@
-import type { Connection, Wall } from '../elements/model';
+import type { Connection, ConnectionType, Wall } from '../elements/model';
+import { MEDIA_PROFILE } from '../elements/model';
 import type { RoomConfig } from '../constraints/brief';
-import type { PlacedElement, PlacedFixture } from './evaluator';
+import type { PlacedDoor, PlacedElement, PlacedFixture } from './evaluator';
 import type { Point } from './geometry';
+import { segmentIntersectsRect } from './geometry';
 
 export interface RoutingPolicy {
   allowFloorRoutes: boolean;
@@ -18,6 +20,9 @@ export interface ServiceRoute {
   length: number;
   rerouted: boolean; // priklop v tla, preusmerjen po steni, ker talne trase niso dovoljene
   crossesFloorRoute: boolean;
+  medium: ConnectionType; // medij trase (= connection.type)
+  mediumOk: boolean; // ali trasa ustreza profilu medija
+  mediumNote: string; // razlaga (steklena škatla): zakaj OK / zakaj ne
 }
 
 export interface RoutingResult {
@@ -37,6 +42,7 @@ export function routeServices(
   policy: RoutingPolicy = DEFAULT_POLICY,
 ): RoutingResult {
   const fixtures = placed.filter((item): item is PlacedFixture => item.kind !== 'door');
+  const doors = placed.filter((item): item is PlacedDoor => item.kind === 'door');
   const routes = fixtures.flatMap((fixture) =>
     fixture.el.conns.map((connection) => {
       const from = placedConnectionPoint(fixture, connection);
@@ -47,6 +53,15 @@ export function routeServices(
       // Po tleh = ravna trasa pod ploščo. Po steni = trasa po obodu (hugging),
       // saj cev ne sme čez tla.
       const path = useFloor ? [from, to] : wallPath(from, fixture.wall, cfg.wetWall, cfg.W, cfg.D);
+
+      const profile = MEDIA_PROFILE[connection.type];
+      const crossesDoor = profile.gravity && doors.some((door) => segmentIntersectsRect(from, to, door.pass) || segmentIntersectsRect(from, to, door.foot));
+      const mediumOk = !crossesDoor;
+      const mediumNote = !profile.gravity
+        ? `${profile.label}: ${profile.mayCrossObstacles ? 'prosta pot, sme čez ovire' : 'prosta pot'}`
+        : crossesDoor
+        ? `${profile.label}: bi moral čez prag vrat — gravitacijski odvod tega ne zmore`
+        : `${profile.label}: ima vertikalo (mokri zid) v dosegu, brez ovir`;
 
       return {
         id: `${fixture.name}-${connection.id}`,
@@ -59,6 +74,9 @@ export function routeServices(
         length: polylineLength(path),
         rerouted: wantsFloor && !policy.allowFloorRoutes,
         crossesFloorRoute: false,
+        medium: connection.type,
+        mediumOk,
+        mediumNote,
       } satisfies ServiceRoute;
     }),
   );
