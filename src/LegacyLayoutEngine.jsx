@@ -461,7 +461,7 @@ function StagePanel({rp}){
   ];
   return (
     <main className="cstage">
-      <div className="legend mono"><span><i style={{background:"#2b3138"}}/>oprema</span><span><i style={{background:"#e2553f"}}/>jedro</span><span><i style={{background:"#d9a23b",opacity:.5}}/>halo</span><span><i style={{background:"#c0392b"}}/>prekrivanje</span><span><i style={{background:"#5aa9e6",opacity:.35}}/>človek</span><span><i style={{background:"#86c9ff",opacity:.5}}/>okno</span><span><i style={{background:"#16b3b3"}}/>mokri zid</span><span><i style={{background:"#5bbd8b"}}/>pot</span></div>
+      <div className="legend mono"><span><i style={{background:"#2b3138"}}/>oprema</span><span><i style={{background:"#e2553f"}}/>jedro</span><span><i style={{background:"#d9a23b",opacity:.5}}/>halo</span><span><i style={{background:"#c0392b"}}/>prekrivanje</span><span><i style={{background:"#5aa9e6",opacity:.35}}/>človek</span><span><i style={{background:"#86c9ff",opacity:.5}}/>okno</span><span><i style={{background:"#8a96a3"}}/>stena</span><span><i style={{background:"#16b3b3"}}/>mokri zid</span><span><i style={{background:"#5bbd8b"}}/>pot</span></div>
       <div className="viewTabs" role="tablist" aria-label="Pogled risbe">
         {viewButtons.map(([id,label])=><button key={id} className={view===id?"on":""} onClick={()=>setView(id)}>{label}</button>)}
       </div>
@@ -618,6 +618,7 @@ const WALL_LABELS={N:"S",E:"V",S:"J",W:"Z"};
 function ElevationView({cand,cfg,wall}){
   const model=buildElevation(cand.placed,cfg,wall);
   const PADL=360,PADR=160,PADT=260,PADB=280;
+  const WALL=120;
   const axis=model.width;
   const yOf=(r)=>model.height-r.y-r.h;
   const ticks=[];
@@ -627,6 +628,15 @@ function ElevationView({cand,cfg,wall}){
   const strokeOf=(r)=>r.kind==="human"?"#3a78b0":r.kind==="window"?"#3f86c9":"#2b3138";
   return <svg viewBox={`${-PADL} ${-PADT} ${axis+PADL+PADR} ${model.height+PADT+PADB}`} style={{width:"100%",height:"100%"}}>
     <rect x={-PADL} y={-PADT} width={axis+PADL+PADR} height={model.height+PADT+PADB} fill="#f6f7f3"/>
+    <g>
+      <rect x="0" y="0" width={axis} height={model.height} fill="#eef1ed" stroke="#2b3138" strokeWidth="16"/>
+      <rect x={-WALL} y="0" width={WALL} height={model.height+WALL} fill="#d8ded7" stroke="#2b3138" strokeWidth="14"/>
+      <rect x={axis} y="0" width={WALL} height={model.height+WALL} fill="#d8ded7" stroke="#2b3138" strokeWidth="14"/>
+      <rect x={-WALL} y={model.height} width={axis+WALL*2} height={WALL} fill="#cfd6cf" stroke="#2b3138" strokeWidth="14"/>
+      <rect x="0" y={-WALL} width={axis} height={WALL} fill="#d8ded7" stroke="#2b3138" strokeWidth="14"/>
+      <line x1="0" y1="0" x2="0" y2={model.height} stroke="#7f8a96" strokeWidth="18"/>
+      <line x1={axis} y1="0" x2={axis} y2={model.height} stroke="#7f8a96" strokeWidth="18"/>
+    </g>
     <g fontFamily="ui-monospace,Menlo,monospace" fill="#8a96a3">
       <text x={axis/2} y={-126} fontSize="96" textAnchor="middle">Naris {WALL_LABELS[wall]} · vzdolž zidu / višina Z</text>
       <line x1="0" y1={model.height} x2={axis} y2={model.height} stroke="#2b3138" strokeWidth="18"/>
