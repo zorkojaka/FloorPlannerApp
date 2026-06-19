@@ -175,6 +175,51 @@ export function distanceToWall(cx: number, cy: number, wall: Wall, roomW: number
   return cx;
 }
 
+export interface DoorSwingGeometry {
+  hx: number; hy: number; // tečaj (fiksna točka na zidu)
+  jx: number; jy: number; // zaprti podboj (krilo zaprto leži tu)
+  tx: number; ty: number; // konica odprtega krila (90°, pravokotno na zid)
+  lw: number; // širina krila = radij loka
+  sweep: 0 | 1; // SVG smer loka, izračunana iz dejanskega kota (atan2)
+}
+
+/**
+ * Geometrija nihanja vrat: tečaj je fiksna točka na zidu; krilo gre iz tečaja
+ * pravokotno v sobo (Noter) ali ven (Ven); lok pomete z radijem = širina krila
+ * okoli tečaja do zaprtega podboja. Smer loka (sweep) iz atan2, ne fiksne logike.
+ */
+export function doorSwing(
+  wall: Wall,
+  hinge: 0 | 1,
+  dir: 'inward' | 'outward',
+  foot: Rect,
+  roomW: number,
+  roomD: number,
+): DoorSwingGeometry {
+  const lw = wall === 'N' || wall === 'S' ? foot.w : foot.h;
+  const norm: Record<Wall, [number, number]> = { S: [0, -1], N: [0, 1], W: [1, 0], E: [-1, 0] };
+  const along: Record<Wall, [number, number]> = { S: [1, 0], N: [1, 0], W: [0, 1], E: [0, 1] };
+  let sx: number, sy: number;
+  if (wall === 'S') { sx = foot.x; sy = roomD; }
+  else if (wall === 'N') { sx = foot.x; sy = 0; }
+  else if (wall === 'W') { sx = 0; sy = foot.y; }
+  else { sx = roomW; sy = foot.y; }
+
+  const sgn = dir === 'outward' ? -1 : 1;
+  const hs = hinge ? 1 : 0;
+  const hx = sx + along[wall][0] * lw * hs, hy = sy + along[wall][1] * lw * hs;
+  const jx = sx + along[wall][0] * lw * (1 - hs), jy = sy + along[wall][1] * lw * (1 - hs);
+  const tx = hx + norm[wall][0] * lw * sgn, ty = hy + norm[wall][1] * lw * sgn;
+
+  const aT = Math.atan2(ty - hy, tx - hx);
+  const aJ = Math.atan2(jy - hy, jx - hx);
+  let d = aJ - aT;
+  while (d <= -Math.PI) d += 2 * Math.PI;
+  while (d > Math.PI) d -= 2 * Math.PI;
+
+  return { hx, hy, jx, jy, tx, ty, lw, sweep: d > 0 ? 1 : 0 };
+}
+
 export function wallEdge(wall: Wall, roomW: number, roomD: number): { x1: number; y1: number; x2: number; y2: number } {
   if (wall === 'S') return { x1: 0, y1: roomD, x2: roomW, y2: roomD };
   if (wall === 'N') return { x1: 0, y1: 0, x2: roomW, y2: 0 };

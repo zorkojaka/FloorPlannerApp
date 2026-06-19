@@ -6,7 +6,7 @@ import type { Point } from './geometry';
 import { clamp } from '../shared/math';
 import { distanceToWall, isInsideRoom, overlapArea, overlapBox } from './geometry';
 import { collides3D, elementBox, humanUsageBox, windowClearBox } from './volume';
-import { buildFreeGrid, reachable } from './freespace';
+import { buildFreeGrid, reachable, RANK1_PASS_WIDTH } from './freespace';
 
 export type PlacedFixture = FixtureRects & {
   el: Element;
@@ -44,6 +44,7 @@ export function evalPlace(
   cfg: RoomConfig,
   soft: boolean,
   zones: NoGoZone[] = [],
+  minPathWidth: number = RANK1_PASS_WIDTH,
 ): Evaluation {
   const { W, D, wetWall, minAisle } = cfg;
   const violations: string[] = [];
@@ -141,7 +142,7 @@ export function evalPlace(
     const entry = doorInteriorPoint(doors[0]);
     for (const fixture of fixtures) {
       const target = usagePoint(fixture);
-      if (!reachable(grid, entry, target)) {
+      if (!reachable(grid, entry, target, minPathWidth)) {
         violations.push(`ni prehodne poti do ${fixture.name}`);
       }
     }

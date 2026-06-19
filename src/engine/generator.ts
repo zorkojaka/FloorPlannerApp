@@ -21,6 +21,7 @@ export interface GenerateLayoutOptions {
   soft: boolean;
   zones?: NoGoZone[];
   samples?: number;
+  minPathWidth?: number; // minimalna širina poti (trdo): pod njo razporeditev ni veljavna
 }
 
 const WALLS: Wall[] = ['N', 'S', 'E', 'W'];
@@ -32,6 +33,7 @@ export function generateLayoutPool({
   soft,
   zones = [],
   samples = 1100,
+  minPathWidth,
 }: GenerateLayoutOptions): LayoutCandidate[] {
   if (!checkFeasibility(library, program, cfg, zones).feasible) return [];
 
@@ -79,7 +81,7 @@ export function generateLayoutPool({
 
     if (!ok) continue;
 
-    const ev = evalPlace(placed, cfg, soft, zones);
+    const ev = evalPlace(placed, cfg, soft, zones, minPathWidth);
     if (ev.valid) out.push({ placed, ev });
   }
 

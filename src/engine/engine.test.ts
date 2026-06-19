@@ -4,7 +4,7 @@ import { orientation, serviceSides } from '../elements/model';
 import type { PlacedElement, PlacedFixture } from './evaluator';
 import { evalPlace } from './evaluator';
 import { checkFeasibility } from './feasibility';
-import { doorRects, overlapArea, placeRects } from './geometry';
+import { doorRects, doorSwing, overlapArea, placeRects } from './geometry';
 import { generateLayoutPool } from './generator';
 import { placedConnectionPoint, routeServices } from './routing';
 import { initialPreferenceState, recordPreference } from './preference';
@@ -12,10 +12,9 @@ import type { LayoutCandidate } from './generator';
 import { applyInducedRules, induceRules } from '../rules/induction';
 import { measureGeneralization, measureInductionHoldout, measurePreferenceGain } from './metrics';
 import { loadJson, saveJson, type JsonStorage } from '../shared/storage';
-import { defaultChannels, effectiveWeight, learnChannelsFromPreference, rankByChannels } from './channels';
+import { defaultChannels, effectiveWeight, learnChannelsFromPreference, rankByChannels, scoreCandidateChannels } from './channels';
 import { collides3D, humanUsageBox, overlapVolume } from './volume';
 import { buildFreeGrid, corridorWidth, findPath, reachable } from './freespace';
-import { meetingWidthFor, pathWidthFor, TRAFFIC_PROFILES, trafficProfile } from './traffic';
 import { nextPair, pairInformation, suggestedExplore } from './active';
 import { fromRoomConstraints, type RoomConstraints } from '../constraints/brief';
 
@@ -433,21 +432,51 @@ describe('3.0 walkability (rang 1 prehodnost)', () => {
   });
 });
 
-describe('5.0 traffic profiles', () => {
-  it('derives rang-1 path width from the unit profile, plus optional extra', () => {
-    expect(pathWidthFor(TRAFFIC_PROFILES.pedestrian)).toBe(600);
-    expect(pathWidthFor(TRAFFIC_PROFILES.pedestrian, 200)).toBe(800);
-    expect(pathWidthFor(TRAFFIC_PROFILES.forklift)).toBeGreaterThan(pathWidthFor(TRAFFIC_PROFILES.pedestrian));
-  });
+describe('door swing geometry (vsi zidovi × tečaj × smer)', () => {
+  // središče SVG eliptičnega loka (rx=ry=r) iz endpoint parametrizacije (W3C)
+  function svgArcCenter(x1: number, y1: number, x2: number, y2: number, r: number, laf: number, sf: number) {
+    const x1p = (x1 - x2) / 2, y1p = (y1 - y2) / 2;
+    let rx = r, ry = r;
+    const lam = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
+    if (lam > 1) { rx *= Math.sqrt(lam); ry *= Math.sqrt(lam); }
+    const sign = laf !== sf ? 1 : -1;
+    const num = Math.max(0, rx * rx * ry * ry - rx * rx * y1p * y1p - ry * ry * x1p * x1p);
+    const den = rx * rx * y1p * y1p + ry * ry * x1p * x1p;
+    const co = sign * Math.sqrt(num / den);
+    const cxp = (co * rx * y1p) / ry, cyp = (co * -ry * x1p) / rx;
+    return { cx: cxp + (x1 + x2) / 2, cy: cyp + (y1 + y2) / 2 };
+  }
 
-  it('rang-2 meeting width is two profiles wide', () => {
-    expect(meetingWidthFor(TRAFFIC_PROFILES.pedestrian)).toBe(1200);
-  });
+  const W = 2000, D = 2400, leaf = 800;
+  const footOf = (wall: 'N' | 'S' | 'E' | 'W') =>
+    wall === 'N' ? { x: 500, y: 0, w: leaf, h: 80 }
+      : wall === 'S' ? { x: 500, y: D - 80, w: leaf, h: 80 }
+      : wall === 'W' ? { x: 0, y: 600, w: 80, h: leaf }
+      : { x: W - 80, y: 600, w: 80, h: leaf };
 
-  it('falls back to the pedestrian profile for unknown ids', () => {
-    expect(trafficProfile('nope').id).toBe('pedestrian');
-    expect(trafficProfile('forklift').id).toBe('forklift');
-  });
+  for (const wall of ['N', 'S', 'E', 'W'] as const) {
+    for (const hinge of [0, 1] as const) {
+      for (const dir of ['inward', 'outward'] as const) {
+        it(`${wall} · tečaj ${hinge} · ${dir}: lok centriran na tečaju, krilo pravokotno`, () => {
+          const g = doorSwing(wall, hinge, dir, footOf(wall), W, D);
+
+          // krilo in podboj sta na radiju lw od tečaja
+          expect(Math.hypot(g.tx - g.hx, g.ty - g.hy)).toBeCloseTo(leaf, 5);
+          expect(Math.hypot(g.jx - g.hx, g.jy - g.hy)).toBeCloseTo(leaf, 5);
+
+          // krilo pravokotno na zid: vzdolž-zidu komponenta ≈ 0
+          const alongVec = wall === 'N' || wall === 'S' ? [1, 0] : [0, 1];
+          const leafVec = [g.tx - g.hx, g.ty - g.hy];
+          expect(Math.abs(leafVec[0] * alongVec[0] + leafVec[1] * alongVec[1])).toBeLessThan(1);
+
+          // KLJUČNO: središče dejanskega SVG loka == tečaj (sweep pravilen)
+          const c = svgArcCenter(g.tx, g.ty, g.jx, g.jy, g.lw, 0, g.sweep);
+          expect(c.cx).toBeCloseTo(g.hx, 3);
+          expect(c.cy).toBeCloseTo(g.hy, 3);
+        });
+      }
+    }
+  }
 });
 
 describe('5.0 path as a visible object', () => {
@@ -472,7 +501,7 @@ describe('5.0 path as a visible object', () => {
     expect(result.blockedAt!.y).toBeLessThan(1400); // zatakne se pred pregrado
   });
 
-  it('a wider profile needs a wider corridor (forklift fails a pedestrian gap)', () => {
+  it('a wider required width needs a wider corridor (narrow gap fails the larger width)', () => {
     const gap = [
       { x: 0, y: 1400, w: 1100, h: 200, z: 0, h3: 2000 },
       { x: 1900, y: 1400, w: 1100, h: 200, z: 0, h3: 2000 },
@@ -481,8 +510,8 @@ describe('5.0 path as a visible object', () => {
     const from = { x: 1500, y: 300 };
     const to = { x: 1500, y: 2700 };
 
-    expect(findPath(grid, from, to, pathWidthFor(TRAFFIC_PROFILES.pedestrian)).reachable).toBe(true);
-    expect(findPath(grid, from, to, pathWidthFor(TRAFFIC_PROFILES.forklift)).reachable).toBe(false);
+    expect(findPath(grid, from, to, 600).reachable).toBe(true); // ozka pot OK
+    expect(findPath(grid, from, to, 1200).reachable).toBe(false); // širši trak ne gre skozi 800 mm režo
   });
 });
 
@@ -564,6 +593,78 @@ describe('4.0 per-room constraints interface', () => {
     expect(split.program.map((p) => p.key)).toEqual(['door', 'toilet', 'sink']);
     expect(split.zones).toHaveLength(1);
     expect(split.routingPolicy.floorAllowed).toBe(false);
+  });
+});
+
+describe('test-bench wiring (ablacija + prior/learned)', () => {
+  const cfg = { W: 2000, D: 2000, wetWall: 'S' as const, minAisle: 800 };
+  const sink = baseLib().sink;
+  const fx = (wall: 'N' | 'S' | 'E' | 'W', pos: number) => {
+    const r = placeRects(sink, wall, pos, cfg.W, cfg.D);
+    return { ...r, el: sink, wall, name: 'Umivalnik' };
+  };
+  // A: gručeno (dobro za cluster), daleč od mokrega zidu S (slabo za drain)
+  const A: LayoutCandidate = { placed: [fx('N', 100), fx('N', 700)] as any, ev: { valid: true, viol: [], halo: 0, overlaps: [], aisle: 1000, drain: 0, score: 0.5 } };
+  // B: ob mokrem zidu S (dobro za drain), razpotegnjeno (slabo za cluster)
+  const B: LayoutCandidate = { placed: [fx('S', 100), fx('S', 1400)] as any, ev: { valid: true, viol: [], halo: 0, overlaps: [], aisle: 1000, drain: 0, score: 0.5 } };
+
+  function onlyTwo() {
+    return defaultChannels().map((c) =>
+      c.id === 'drain-distance' || c.id === 'same-category-cluster' ? { ...c, enabled: true } : { ...c, enabled: false },
+    );
+  }
+
+  it('TOČKA 1 — izklop kanala vidno spremeni rangiranje', () => {
+    const drainGood = candidateWith({ halo: 0, drain: 200, score: 0.5 });
+    const drainBad = candidateWith({ halo: 0, drain: 3000, score: 0.5 });
+    const channels = defaultChannels(); // drain-distance vklopljen
+
+    expect(rankByChannels([drainBad, drainGood], channels, cfg)[0]).toBe(drainGood);
+
+    const off = channels.map((c) => (c.id === 'drain-distance' ? { ...c, enabled: false } : c));
+    // brez drain kanala sta enaka po ostalih → vrstni red ostane vhodni [drainBad, ...]
+    expect(rankByChannels([drainBad, drainGood], off, cfg)[0]).toBe(drainBad);
+  });
+
+  it('TOČKA 2 — premik PRIOR drsnika spremeni rangiranje', () => {
+    const drainHeavy = onlyTwo().map((c) =>
+      c.id === 'drain-distance' ? { ...c, prior: 0.95, confidence: 1 } : c.id === 'same-category-cluster' ? { ...c, prior: 0.05, confidence: 1 } : c,
+    );
+    const clusterHeavy = onlyTwo().map((c) =>
+      c.id === 'same-category-cluster' ? { ...c, prior: 0.95, confidence: 1 } : c.id === 'drain-distance' ? { ...c, prior: 0.05, confidence: 1 } : c,
+    );
+
+    expect(rankByChannels([A, B], drainHeavy, cfg)[0]).toBe(B); // drain prevlada → B (ob mokrem zidu)
+    expect(rankByChannels([A, B], clusterHeavy, cfg)[0]).toBe(A); // cluster prevlada → A (gručeno)
+  });
+
+  it('TOČKA 3 — A/B premakne LEARNED, PRIOR ostane nedotaknjen', () => {
+    const channels = defaultChannels();
+    const before = channels.find((c) => c.id === 'drain-distance')!;
+    const selected = candidateWith({ halo: 0, drain: 200, score: 0.8 });
+    const rejected = candidateWith({ halo: 0, drain: 3000, score: 0.4 });
+
+    const after = learnChannelsFromPreference(channels, selected, rejected, cfg).find((c) => c.id === 'drain-distance')!;
+
+    expect(after.prior).toBe(before.prior); // PRIOR se NE prepiše
+    expect(after.learned).not.toBe(before.learned); // LEARNED se premakne
+  });
+
+  it('TOČKA 4 — drsnik zaupanja meša prior in learned v efektivno utež', () => {
+    const base = { ...defaultChannels()[0], prior: 0.8, learned: 0.2 };
+    expect(effectiveWeight({ ...base, confidence: 1 })).toBeCloseTo(0.8); // zaupanje 1 = sam prior
+    expect(effectiveWeight({ ...base, confidence: 0 })).toBeCloseTo(0.2); // zaupanje 0 = sam learned
+    expect(effectiveWeight({ ...base, confidence: 0.5 })).toBeCloseTo(0.5); // pol-pol
+  });
+
+  it('skupni score odraža vklopljene kanale (steklena škatla)', () => {
+    const full = scoreCandidateChannels(B, defaultChannels(), cfg).total;
+    const drainOnly = scoreCandidateChannels(
+      B,
+      defaultChannels().map((c) => ({ ...c, enabled: c.id === 'drain-distance' })),
+      cfg,
+    ).total;
+    expect(full).not.toBeCloseTo(drainOnly, 5);
   });
 });
 

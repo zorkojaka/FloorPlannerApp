@@ -1,7 +1,7 @@
 ﻿import React, { useState, useRef, useMemo, useEffect } from "react";
 import { baseLib } from "./elements/library";
 import { CONNECTION_META as CONN, SIDE_LABELS as SIDES, isDoor, orientation, serviceSides } from "./elements/model";
-import { connectionPoint as connXY, nearestEdge, wallEdge } from "./engine/geometry";
+import { connectionPoint as connXY, nearestEdge, wallEdge, doorSwing } from "./engine/geometry";
 import { generateLayoutPool } from "./engine/generator";
 import { routeServices } from "./engine/routing";
 import { checkFeasibility } from "./engine/feasibility";
@@ -10,7 +10,6 @@ import { nextPair, suggestedExplore } from "./engine/active";
 import { buildFreeGrid, findPath } from "./engine/freespace";
 import { elementBox } from "./engine/volume";
 import { doorInteriorPoint, usagePoint } from "./engine/evaluator";
-import { trafficProfile, pathWidthFor, TRAFFIC_PROFILES } from "./engine/traffic";
 import { measureGeneralization, measureInductionHoldout, measurePreferenceGain } from "./engine/metrics";
 import { defaultChannels, effectiveWeight, learnChannelsFromPreference, rankByChannels, scoreCandidateChannels } from "./engine/channels";
 import { applyInducedRules, induceRules, parseReferenceJson } from "./rules/induction";
@@ -318,6 +317,9 @@ function useRoomProject(library){
   const [allowFloorRoutes,setAllowFloorRoutes]=usePersistentState("floorplanner.project.allowFloorRoutes",true);
   const [zones,setZones]=usePersistentState("floorplanner.project.zones",[]);
   const setZone=(id,patch)=>setZones(Z=>Z.map(z=>z.id===id?{...z,...patch}:z));
+  const [pathMin,setPathMin]=usePersistentState("floorplanner.pathMin",600);   // trdo: pod njo razporeditev ni veljavna
+  const [pathWant,setPathWant]=usePersistentState("floorplanner.pathWant",900); // mehko: udobje/srečanje, vpliva na oceno
+  const [showPaths,setShowPaths]=usePersistentState("floorplanner.showPaths",true);
   const [pool,setPool]=useState([]); const [idx,setIdx]=useState(0); const [seed,setSeed]=useState(0);
   const [pref,setPref]=usePersistentState("floorplanner.preference",initialPreferenceState);
   const [channels,setChannels]=usePersistentState("floorplanner.channels",defaultChannels);
@@ -327,21 +329,24 @@ function useRoomProject(library){
 
   useEffect(()=>{
     if(!feasibility.feasible){setPool([]);setIdx(0);return;}
-    setPool(generateLayoutPool({library, program:prog, cfg, soft, zones}));
+    setPool(generateLayoutPool({library, program:prog, cfg, soft, zones, minPathWidth:pathMin}));
     setIdx(0);
-  },[library,prog,W,D,wet,soft,zones,seed,cfg,feasibility]);
+  },[library,prog,W,D,wet,soft,zones,seed,cfg,feasibility,pathMin]);
 
   const cornerEls=prog.filter(p=>{const e=library[p.key];return e&&!isDoor(e)&&serviceSides(e).length>1;});
   const hasDoor=prog.some(p=>isDoor(library[p.key]));
-  const best=pool[idx];
+  // ŽIVO rangiranje po testni mizi: bazen razvrsti po preferenci + kanalih sproti,
+  // zato izklop kanala / premik priorja / drsnik zaupanja takoj spremenijo, kateri
+  // je "best" in vrstni red sličic — kanali dejansko vplivajo, ne le rišejo.
+  const ranked=useMemo(()=>rankByChannels(rankByPreference(pool,pref.weights),channels,cfg),[pool,channels,pref.weights,cfg]);
+  const best=ranked[idx];
   const [explore,setExplore]=usePersistentState("floorplanner.explore",0.7);
-  const abPair=useMemo(()=>nextPair(pool,channels,cfg,explore),[pool,channels,cfg,explore]);
+  const abPair=useMemo(()=>nextPair(ranked,channels,cfg,explore),[ranked,channels,cfg,explore]);
   const optionA=abPair?.a, optionB=abPair?.b;
   const bestChannelScores=best?scoreCandidateChannels(best,channels,cfg):null;
   const routing=useMemo(()=>best?routeServices(best.placed,cfg,{allowFloorRoutes}):null,[best,cfg,allowFloorRoutes]);
-  const [profileId,setProfileId]=usePersistentState("floorplanner.profile","pedestrian");
-  const [showPaths,setShowPaths]=usePersistentState("floorplanner.showPaths",true);
-  const profile=trafficProfile(profileId);
+  // Poti so trak širine = minimalna (trdo). Trasa od vrat do uporabne točke vsakega
+  // elementa; najožja točka in mesto blokade so del rezultata (steklena škatla).
   const paths=useMemo(()=>{
     if(!best) return [];
     const fixtures=best.placed.filter(p=>p.kind!=="door");
@@ -349,23 +354,29 @@ function useRoomProject(library){
     if(!door||fixtures.length===0) return [];
     const grid=buildFreeGrid(W,D,fixtures.map(elementBox));
     const entry=doorInteriorPoint(door);
-    const width=pathWidthFor(profile);
-    return fixtures.map(f=>({name:f.name,...findPath(grid,entry,usagePoint(f),width)}));
-  },[best,W,D,profileId]);
+    return fixtures.map(f=>({name:f.name,...findPath(grid,entry,usagePoint(f),pathMin)}));
+  },[best,W,D,pathMin]);
+  // Želena širina (mehko): udobje — koliko najožja pot presega želeno. Vpliva le
+  // na to oceno, ne na veljavnost.
+  const comfort=useMemo(()=>{
+    const reach=paths.filter(p=>p.reachable);
+    if(reach.length===0) return null;
+    const minW=Math.min(...reach.map(p=>p.minWidth));
+    return {minWidth:minW, allOk:reach.length===paths.length, ratio:Math.max(0,Math.min(1,minW/Math.max(pathWant,1)))};
+  },[paths,pathWant]);
   const choosePreference=(selected,rejected)=>setPref(prev=>{
     const next=recordPreference(prev,selected,rejected);
-    const learnedChannels=learnChannelsFromPreference(channels,selected,rejected,cfg);
-    setChannels(learnedChannels);
-    setPool(P=>rankByChannels(rankByPreference(P,next.weights),learnedChannels,cfg));
+    // učenje posodobi LEARNED (ne prior); živo rangiranje (ranked memo) takoj prevzame
+    setChannels(C=>learnChannelsFromPreference(C,selected,rejected,cfg));
     setIdx(0);
     return next;
   });
   const setChannel=(id,patch)=>setChannels(C=>C.map(c=>c.id===id?{...c,...patch}:c));
   const setInst=(id,patch)=>setProg(P=>P.map(p=>p.id===id?{...p,...patch}:p));
   return {W,setW,D,setD,wet,setWet,prog,setProg,setInst,soft,setSoft,allowFloorRoutes,setAllowFloorRoutes,zones,setZones,setZone,
-    pool,idx,setIdx,seed,setSeed,pref,channels,setChannel,cfg,feasibility,cornerEls,hasDoor,best,explore,setExplore,
+    pool:ranked,idx,setIdx,seed,setSeed,pref,channels,setChannel,cfg,feasibility,cornerEls,hasDoor,best,explore,setExplore,
     abPair,optionA,optionB,bestChannelScores,routing,choosePreference,
-    profileId,setProfileId,profile,showPaths,setShowPaths,paths};
+    pathMin,setPathMin,pathWant,setPathWant,showPaths,setShowPaths,paths,comfort};
 }
 
 // O2 v pogledu orehov (testna miza): vse troje hkrati, kot prej.
@@ -380,7 +391,7 @@ function O2({library}){
 
 /* ===== Korak 2 — omejitve sobe (leva polovica nekdanjega O2) ===== */
 function ConstraintsPanel({rp,library}){
-  const {W,setW,D,setD,wet,setWet,prog,setProg,setInst,soft,setSoft,allowFloorRoutes,setAllowFloorRoutes,zones,setZones,setZone,hasDoor,cornerEls,feasibility,setSeed,profileId,setProfileId,profile,showPaths,setShowPaths}=rp;
+  const {W,setW,D,setD,wet,setWet,prog,setProg,setInst,soft,setSoft,allowFloorRoutes,setAllowFloorRoutes,zones,setZones,setZone,hasDoor,cornerEls,feasibility,setSeed,pathMin,setPathMin,pathWant,setPathWant,showPaths,setShowPaths}=rp;
   return (
     <aside className="col">
       <div className="eyebrow">Prostor</div>
@@ -422,9 +433,10 @@ function ConstraintsPanel({rp,library}){
       <div className="softNote">{soft?"Halo se sme prekriti (kazen). Lok vrat ostane TRDO pravilo - vanj nikoli.":"Strogo: vsako prekrivanje halo = zavrnitev."}</div>
       <label className="softTgl"><input type="checkbox" checked={allowFloorRoutes} onChange={e=>setAllowFloorRoutes(e.target.checked)}/> <span>O5: talne trase dovoljene</span></label>
       <div className="softNote">{allowFloorRoutes?"Priklopi, ki vodijo v tla, se trasirajo naravnost po plošči.":"Priklopi v tla se preusmerijo po steni (obodu) do mokrega zidu - daljša trasa, brez prebijanja plošče."}</div>
-      <div className="eyebrow mt">Profil prometa</div>
-      <div className="addRow">{Object.values(TRAFFIC_PROFILES).map(p=><button key={p.id} className={profileId===p.id?"on":""} onClick={()=>setProfileId(p.id)}>{p.name} <span className="mono">{p.w}×{p.d}{p.turningRadius?` · r${p.turningRadius}`:""}</span></button>)}</div>
-      <div className="softNote">Pot mora prenesti enoto profila ({profile.w} mm široko). Pešec = privzeto; viličar/voziček/paleta raztegnejo isti engine v proizvodno domeno.</div>
+      <div className="eyebrow mt">Širina poti</div>
+      <Num label="Minimalna (trdo)" v={pathMin} set={setPathMin} min={300} max={2400} step={50} c="#e2553f"/>
+      <Num label="Želena (mehko)" v={pathWant} set={setPathWant} min={300} max={3000} step={50} c="#5bbd8b"/>
+      <div className="softNote">Pot je trak te širine. <b style={{color:"#e2553f"}}>Minimalna</b> je trda: pod njo razporeditev ni veljavna. <b style={{color:"#5bbd8b"}}>Želena</b> je mehka: udobje/srečanje, vpliva le na oceno. (Obračanje viličarja/radij je odloženo za proizvodno domeno.)</div>
       <label className="softTgl"><input type="checkbox" checked={showPaths} onChange={e=>setShowPaths(e.target.checked)}/> <span>Pokaži poti (vrata → element)</span></label>
       <button className="regen" onClick={()=>setSeed(s=>s+1)}>↻ Generiraj</button>
     </aside>
@@ -433,11 +445,11 @@ function ConstraintsPanel({rp,library}){
 
 /* ===== Korak 3 (a) — oder z razporeditvijo in poolom ===== */
 function StagePanel({rp}){
-  const {best,cfg,zones,routing,feasibility,hasDoor,soft,pool,idx,setIdx,paths,showPaths}=rp;
+  const {best,cfg,zones,routing,feasibility,hasDoor,soft,pool,idx,setIdx,paths,showPaths,pathMin,pathWant}=rp;
   return (
     <main className="cstage">
       <div className="legend mono"><span><i style={{background:"#2b3138"}}/>oprema</span><span><i style={{background:"#e2553f"}}/>jedro</span><span><i style={{background:"#d9a23b",opacity:.5}}/>halo</span><span><i style={{background:"#c0392b"}}/>halo prekrit</span><span><i style={{background:"#5aa9e6"}}/>lok vrat</span><span><i style={{background:"#16b3b3"}}/>mokri zid</span><span><i style={{background:"#5bbd8b"}}/>pot</span><span><i style={{background:"#e2553f"}}/>blokada</span></div>
-      <div className="sheet">{best? <O2Plan cand={best} cfg={cfg} zones={zones} routing={routing} paths={showPaths?paths:[]}/> : <div className="noRes">{!feasibility.feasible?<>Brief ni izvedljiv:<br/>{feasibility.reasons.join(" · ")}</>:!hasDoor?"Dodaj vrata - soba brez vrat nima veljavne rešitve.":soft?"Ni veljavne razporeditve ob teh omejitvah. Povečaj prostor ali zrahljaj zahteve.":"V strogem načinu ni rešitve - vklopi mehka pravila."}</div>}</div>
+      <div className="sheet">{best? <O2Plan cand={best} cfg={cfg} zones={zones} routing={routing} paths={showPaths?paths:[]} bandMin={pathMin} bandWant={pathWant}/> : <div className="noRes">{!feasibility.feasible?<>Brief ni izvedljiv:<br/>{feasibility.reasons.join(" · ")}</>:!hasDoor?"Dodaj vrata - soba brez vrat nima veljavne rešitve.":soft?"Ni veljavne razporeditve ob teh omejitvah. Povečaj prostor ali zrahljaj zahteve.":"V strogem načinu ni rešitve - vklopi mehka pravila."}</div>}</div>
       <div className="poolBar">{pool.length>0 && <><span className="mono">{pool.length} veljavnih</span>{pool.slice(0,8).map((c,i)=><button key={i} className={"thumb "+(idx===i?"on":"")} onClick={()=>setIdx(i)}><span className="mono">{(c.ev.score*100|0)}</span></button>)}</>}</div>
     </main>
   );
@@ -445,7 +457,7 @@ function StagePanel({rp}){
 
 /* ===== Korak 3 (b) — preverba, instalacije, A/B aktivno učenje, kanali ===== */
 function ReviewPanel({rp}){
-  const {best,cfg,routing,optionA,optionB,abPair,explore,setExplore,pref,channels,setChannel,bestChannelScores,choosePreference,paths,profile}=rp;
+  const {best,cfg,routing,optionA,optionB,abPair,explore,setExplore,pref,channels,setChannel,bestChannelScores,choosePreference,paths,comfort,pathMin,pathWant}=rp;
   return (
     <aside className="col">
       {best? <>
@@ -468,14 +480,17 @@ function ReviewPanel({rp}){
             <b className="mono">{(r.length/1000).toFixed(2)} m</b>
           </div>)}</div>
         </Section>
-        <Section k="paths" title={`Poti · rang 1 (${profile.name})`}>
+        <Section k="paths" title={<>Poti · trak <span className="mono">{pathMin}</span>/<span className="mono">{pathWant}</span> mm</>}>
           {paths.length>0 ? <div className="routeList">{paths.map((pt,i)=>(
-            <div key={i} className="routeItem" style={pt.reachable?{}:{borderColor:"#7a3028",color:"#f08a78"}}>
-              <span>{pt.name} · {pt.reachable?"prehodno":"NI POTI"}</span>
+            <div key={i} className="routeItem" style={pt.reachable?(pt.minWidth>=pathWant?{}:{borderColor:"#5a4420"}):{borderColor:"#7a3028",color:"#f08a78"}}>
+              <span>{pt.name} · {pt.reachable?(pt.minWidth>=pathWant?"udobno":"ozko"):"NI POTI"}</span>
               <b className="mono">{pt.reachable?Math.round(pt.minWidth)+" mm":"blok"}</b>
             </div>
           ))}</div> : <div className="soft2 none">Ni elementov za pot.</div>}
-          <div className="softNote">Najožja širina mora prenesti profil ({pathWidthFor(profile)} mm). Rang 2 (srečanje dveh) = 2× profil.</div>
+          {comfort && <div className="check ok2" style={comfort.minWidth>=pathWant?{}:{background:"#2a1a10",color:"#d9a23b",border:"1px solid #5a4420"}}>
+            udobje (želena {pathWant} mm): <b className="mono">{Math.round(comfort.ratio*100)}</b> · najožja <b className="mono">{Math.round(comfort.minWidth)}</b> mm
+          </div>}
+          <div className="softNote"><b style={{color:"#e2553f"}}>Minimalna {pathMin} mm</b> = trdo (prehodnost, veljavnost). <b style={{color:"#5bbd8b"}}>Želena {pathWant} mm</b> = mehko (udobje, vpliva le na to oceno).</div>
         </Section>
         <Section k="ab" title="A/B preference · aktivno učenje">
           {optionA&&optionB ? <div className="abBox">
@@ -533,7 +548,7 @@ function Section({k,title,defaultOpen=true,children}){
   </div>;
 }
 
-function O2Plan({cand,cfg,zones,routing,paths=[]}){ const {W,D,wetWall}=cfg; const PAD=900; const we=wallEdge(wetWall,W,D);
+function O2Plan({cand,cfg,zones,routing,paths=[],bandMin=600,bandWant=900}){ const {W,D,wetWall}=cfg; const PAD=900; const we=wallEdge(wetWall,W,D);
   return <svg viewBox={`${-PAD} ${-PAD} ${W+PAD*2} ${D+PAD*2}`} style={{width:"100%",height:"100%"}}>
     <defs><pattern id="hh" width="80" height="80" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="80" stroke="#d9a23b" strokeWidth="12" opacity=".5"/></pattern>
     <pattern id="nogo" width="70" height="70" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="70" stroke="#e2553f" strokeWidth="16" opacity=".55"/></pattern></defs>
@@ -559,10 +574,15 @@ function O2Plan({cand,cfg,zones,routing,paths=[]}){ const {W,D,wetWall}=cfg; con
       <text x={p.foot.x+p.foot.w/2} y={p.foot.y+p.foot.h/2} fill="#3a444f" fontSize="115" fontFamily="ui-sans-serif,system-ui" textAnchor="middle" dy="40">{p.name}</text></g>)}
     {paths.map((pt,i)=>pt.reachable
       ? <g key={"p"+i}>
-          <polyline points={pt.path.map(p=>`${p.x},${p.y}`).join(" ")} fill="none" stroke="#3f7d5e" strokeWidth="26" strokeDasharray="10 48" strokeLinecap="round" strokeLinejoin="round" opacity=".92"/>
+          {/* želena širina = bled trak v ozadju (mehko, udobje) */}
+          <polyline points={pt.path.map(p=>`${p.x},${p.y}`).join(" ")} fill="none" stroke="#5bbd8b" strokeWidth={bandWant} strokeLinecap="round" strokeLinejoin="round" opacity=".10"/>
+          {/* minimalna širina = poln trak (trdo, prehodnost) */}
+          <polyline points={pt.path.map(p=>`${p.x},${p.y}`).join(" ")} fill="none" stroke="#3f7d5e" strokeWidth={bandMin} strokeLinecap="round" strokeLinejoin="round" opacity=".22"/>
+          <polyline points={pt.path.map(p=>`${p.x},${p.y}`).join(" ")} fill="none" stroke="#2f5e46" strokeWidth="14" strokeDasharray="14 40" strokeLinecap="round" strokeLinejoin="round" opacity=".85"/>
           {pt.narrowest&&<g>
-            <circle cx={pt.narrowest.x} cy={pt.narrowest.y} r="48" fill="none" stroke="#3f7d5e" strokeWidth="16"/>
-            <text x={pt.narrowest.x} y={pt.narrowest.y} dy="-72" fill="#2f5e46" fontSize="92" fontFamily="ui-monospace,Menlo,monospace" textAnchor="middle">{Math.round(pt.minWidth)}</text>
+            <line x1={pt.narrowest.x-pt.minWidth/2} y1={pt.narrowest.y} x2={pt.narrowest.x+pt.minWidth/2} y2={pt.narrowest.y} stroke="#d9a23b" strokeWidth="20"/>
+            <circle cx={pt.narrowest.x} cy={pt.narrowest.y} r="40" fill="none" stroke="#d9a23b" strokeWidth="14"/>
+            <text x={pt.narrowest.x} y={pt.narrowest.y} dy="-58" fill="#b8841f" fontSize="92" fontFamily="ui-monospace,Menlo,monospace" textAnchor="middle">{Math.round(pt.minWidth)}</text>
           </g>}
         </g>
       : <g key={"p"+i}>{pt.blockedAt&&<g>
@@ -576,21 +596,9 @@ function O2Plan({cand,cfg,zones,routing,paths=[]}){ const {W,D,wetWall}=cfg; con
 }
 
 function Door({p,W,D}){
-  const lw=(p.wall==="N"||p.wall==="S")?p.foot.w:p.foot.h;
-  const norm={S:[0,-1],N:[0,1],W:[1,0],E:[-1,0]}[p.wall];   // v sobo
-  const along={S:[1,0],N:[1,0],W:[0,1],E:[0,1]}[p.wall];     // vzdolz zidu
-  let sx,sy;
-  if(p.wall==="S"){sx=p.foot.x;sy=D;} else if(p.wall==="N"){sx=p.foot.x;sy=0;}
-  else if(p.wall==="W"){sx=0;sy=p.foot.y;} else {sx=W;sy=p.foot.y;}
-  const sgn=p.dir==="outward"?-1:1;
-  const hs=p.hinge?1:0;
-  const Hx=sx+along[0]*lw*hs,     Hy=sy+along[1]*lw*hs;       // tecaj (fiksen)
-  const Jx=sx+along[0]*lw*(1-hs), Jy=sy+along[1]*lw*(1-hs);   // zaprti podboj
-  const Tx=Hx+norm[0]*lw*sgn,     Ty=Hy+norm[1]*lw*sgn;       // odprto krilo (90°)
-  // sweep iz dejanskega kota: lok od T do J okoli H, krajša pot (90°)
-  const aT=Math.atan2(Ty-Hy,Tx-Hx), aJ=Math.atan2(Jy-Hy,Jx-Hx);
-  let d=aJ-aT; while(d<=-Math.PI)d+=2*Math.PI; while(d>Math.PI)d-=2*Math.PI;
-  const sweep=d>0?1:0;
+  // geometrija iz testirane čiste funkcije (geometry.doorSwing) — tečaj fiksen na
+  // zidu, krilo pravokotno, lok z radijem=širina krila okoli tečaja, sweep iz atan2
+  const {hx:Hx,hy:Hy,jx:Jx,jy:Jy,tx:Tx,ty:Ty,lw,sweep}=doorSwing(p.wall,p.hinge?1:0,p.dir,p.foot,W,D);
   let gap;
   if(p.wall==="S")gap={x:p.foot.x,y:D-70,w:lw,h:140}; else if(p.wall==="N")gap={x:p.foot.x,y:-70,w:lw,h:140};
   else if(p.wall==="W")gap={x:-70,y:p.foot.y,w:140,h:lw}; else gap={x:W-70,y:p.foot.y,w:140,h:lw};
