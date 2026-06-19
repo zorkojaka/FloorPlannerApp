@@ -7,12 +7,58 @@ export type Source = 'default' | 'ifc' | 'user';
 export type ElementKind = 'door' | 'window';
 export type HumanPosture = 'standing' | 'seated' | 'none';
 
+// Medij priklopa = `type` (voda-odvod / voda-dovod / elektrika / zrak). `z` je
+// višina priklopa nad tlemi (mm); če ni nastavljena, privzeto na sredini višine
+// elementa (glej connectionZ).
 export interface Connection {
   id: string;
   type: ConnectionType;
   side: Side;
   off: number;
   routesTo: 'wall' | 'floor';
+  z?: number;
+}
+
+// Profil trasiranja medija — FIZIKA, trd in global, se NE uči.
+// ODLOŽENO (regulirana domena): polni naklonski model gravitacijskega odvoda
+// (troši višino: dolžina × naklon, omejena dolžina jaška) — tu le poenostavljeno.
+export interface MediaProfile {
+  label: string; // slovenski naziv medija
+  gravity: boolean; // rabi padec (gravitacijski) → ne sme čez odprtino vrat
+  mayCrossObstacles: boolean; // tlačni/elektrika/zrak smejo čez ovire
+  rule: string; // pravilo za prikaz (steklena škatla) že pri urejanju
+}
+
+export const MEDIA_PROFILE: Record<ConnectionType, MediaProfile> = {
+  'water-out': {
+    label: 'voda-odvod',
+    gravity: true,
+    mayCrossObstacles: false,
+    rule: 'Gravitacijski odvod: mora padati navzdol; NE čez odprtino vrat/prag; rabi vertikalo (jašek) v dosegu.',
+  },
+  'water-in': {
+    label: 'voda-dovod',
+    gravity: false,
+    mayCrossObstacles: true,
+    rule: 'Tlačni dovod: prosta pot, brez padca; sme čez ovire.',
+  },
+  electric: {
+    label: 'elektrika',
+    gravity: false,
+    mayCrossObstacles: true,
+    rule: 'Elektrika: skoraj prosta pot.',
+  },
+  vent: {
+    label: 'zrak',
+    gravity: false,
+    mayCrossObstacles: true,
+    rule: 'Zrak: prosta pot, a večji presek (polni model odložen).',
+  },
+};
+
+// Višina priklopa: nastavljiva (connection.z) ali privzeto sredina višine elementa.
+export function connectionZ(element: Element, connection: Connection): number {
+  return connection.z ?? (element.z ?? 0) + (element.h ?? 0) / 2;
 }
 
 export interface Element {

@@ -3,10 +3,12 @@ import type { RoomConfig } from '../constraints/brief';
 import type { NoGoZone } from '../constraints/zones';
 import type { DoorRects, FixtureRects, Rect } from './geometry';
 import type { Point } from './geometry';
+import { MEDIA_PROFILE } from '../elements/model';
 import { clamp } from '../shared/math';
-import { distanceToWall, isInsideRoom, overlapArea, overlapBox } from './geometry';
+import { distanceToWall, isInsideRoom, overlapArea, overlapBox, segmentIntersectsRect } from './geometry';
 import { collides3D, elementBox, humanUsageBox, windowClearBox } from './volume';
 import { buildFreeGrid, reachable, RANK1_PASS_WIDTH } from './freespace';
+import { placedConnectionPoint, projectToWetWall } from './routing';
 
 export type PlacedFixture = FixtureRects & {
   el: Element;
@@ -130,6 +132,22 @@ export function evalPlace(
       if (other === win) continue;
       if (collides3D(clearBox, elementBox(other))) {
         violations.push(`element zastira okno (${other.name})`);
+      }
+    }
+  }
+
+  // MEDIJ (trdo, fizika): gravitacijski odvod (voda-odvod) ne sme čez odprtino
+  // vrat — pade po gravitaciji in ne more pod pragom. Tlačni dovod/elektrika/zrak
+  // smejo. MVP: ravna trasa priklop→mokri zid; polni naklonski model je ODLOŽEN.
+  for (const fixture of fixtures) {
+    for (const connection of fixture.el.conns) {
+      if (!MEDIA_PROFILE[connection.type].gravity) continue;
+      const from = placedConnectionPoint(fixture, connection);
+      const to = projectToWetWall(from, wetWall, W, D);
+      for (const door of doors) {
+        if (segmentIntersectsRect(from, to, door.pass) || segmentIntersectsRect(from, to, door.foot)) {
+          violations.push(`odvod ${fixture.name} bi moral čez prag vrat — gravitacijski odvod tega ne zmore`);
+        }
       }
     }
   }
