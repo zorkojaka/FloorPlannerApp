@@ -429,6 +429,8 @@ function useRoomProject(library){
   const chooseEqualPreference=(a,b)=>{
     setDismissedPairs(P=>[...P,pairKey(a,b)]);
     setChampionEvents(E=>[...E.slice(-7),{changed:false,mode:"equal"}]);
+    setChannels(C=>C.map(ch=>({...ch,learned:ch.learned*0.98+0.5*0.02})));
+    setPref(prev=>({...prev,comparisons:prev.comparisons+1,stableStreak:prev.stableStreak+1,converged:prev.stableStreak+1>=5,dominantSignal:"mixed"}));
   };
   const setChannel=(id,patch)=>setChannels(C=>C.map(c=>c.id===id?{...c,...patch}:c));
   const setInst=(id,patch)=>setProg(P=>P.map(p=>p.id===id?{...p,...patch}:p));
@@ -575,7 +577,9 @@ function ABStagePanel({rp}){
       <span>Primerjave <b className="mono">{pref.comparisons}</b></span>
       <span className={changes===0&&recent.length>=3?"conv on":"conv"}>{recent.length<3?"še zbiramo":changes===0?"prvak drži":`prvak se menja ${changes}/${recent.length}`}</span>
       <span>{abPair?.mode||"par"} · donos <b className="mono">{abPair?Math.round(abPair.info*100):0}</b></span>
-      <label>raziskovanje <b className="mono">{Math.round(explore*100)}</b><input type="range" min="0" max="1" step="0.05" value={explore} onChange={e=>setExplore(+e.target.value)}/></label>
+      <label>raziskovanje <b className="mono">{Math.round(explore*100)}</b><input type="range" min="0" max="1" step="0.05" value={explore} onInput={e=>setExplore(+e.target.value)} onChange={e=>setExplore(+e.target.value)}/></label>
+      <button className="microBtn" onClick={()=>setExplore(0)}>izkoriščaj</button>
+      <button className="microBtn" onClick={()=>setExplore(1)}>raziskuj</button>
       <button className="microBtn" onClick={()=>setExplore(suggestedExplore(pref.comparisons))}>predlagaj</button>
     </div>
     <div className="pairModeHints">{pairHints.map(([k,v])=><span key={k}><b>{k}</b>{v}</span>)}</div>
