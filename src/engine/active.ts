@@ -1,7 +1,7 @@
 import type { LayoutCandidate } from './generator';
 import type { Channel } from './channels';
 import type { RoomConfig } from '../constraints/brief';
-import { measureChannel, scoreCandidateChannels } from './channels';
+import { effectiveWeight, measureChannel } from './channels';
 
 // Aktivno učenje — "Ugani kdo": namesto naključnega (ali zgolj najboljšega) A/B
 // para izberi tistega, ki najbolj prepolovi negotovost. Vsaka izbira tako nese
@@ -57,14 +57,24 @@ export function nextPair(
 ): PairChoice | null {
   if (pool.length < 2) return null;
 
-  const quality = pool.map((candidate) => scoreCandidateChannels(candidate, channels, cfg).total);
+  // Vrednosti kanalov izračunaj ENKRAT na kandidata (n×m), ne na vsak par (n²) —
+  // path-comfort gradi mrežo + A*, zato je predpomnjenje nujno za hiter A/B.
+  const vals = pool.map((candidate) => channels.map((channel) => measureChannel(channel.id, candidate, cfg)));
+  const unc = channels.map(channelUncertainty);
+  const enabledWeight = channels.map((channel) => (channel.enabled ? effectiveWeight(channel) : 0));
+  const weightSum = enabledWeight.reduce((sum, w) => sum + w, 0) || 1;
+  const quality = vals.map((v) => v.reduce((sum, value, k) => sum + value * enabledWeight[k], 0) / weightSum);
 
   const pairs: { i: number; j: number; info: number; qual: number }[] = [];
   let maxInfo = 0;
   let maxQual = 0;
   for (let i = 0; i < pool.length; i += 1) {
     for (let j = i + 1; j < pool.length; j += 1) {
-      const info = pairInformation(pool[i], pool[j], channels, cfg);
+      let info = 0;
+      for (let k = 0; k < channels.length; k += 1) {
+        if (unc[k] === 0) continue;
+        info += unc[k] * Math.abs(vals[i][k] - vals[j][k]);
+      }
       const qual = (quality[i] + quality[j]) / 2;
       if (info > maxInfo) maxInfo = info;
       if (qual > maxQual) maxQual = qual;

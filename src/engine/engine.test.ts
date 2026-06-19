@@ -12,7 +12,7 @@ import type { LayoutCandidate } from './generator';
 import { applyInducedRules, induceRules } from '../rules/induction';
 import { measureGeneralization, measureInductionHoldout, measurePreferenceGain } from './metrics';
 import { loadJson, saveJson, type JsonStorage } from '../shared/storage';
-import { defaultChannels, effectiveWeight, learnChannelsFromPreference, rankByChannels, scoreCandidateChannels } from './channels';
+import { defaultChannels, effectiveWeight, learnChannelsFromPreference, measureChannel, rankByChannels, scoreCandidateChannels } from './channels';
 import { collides3D, humanUsageBox, overlapVolume } from './volume';
 import { buildFreeGrid, corridorWidth, findPath, reachable } from './freespace';
 import { nextPair, pairInformation, suggestedExplore } from './active';
@@ -593,6 +593,44 @@ describe('4.0 per-room constraints interface', () => {
     expect(split.program.map((p) => p.key)).toEqual(['door', 'toilet', 'sink']);
     expect(split.zones).toHaveLength(1);
     expect(split.routingPolicy.floorAllowed).toBe(false);
+  });
+});
+
+describe('5.0 path-comfort kot kanal (želena širina na testni mizi)', () => {
+  it('je v privzetih kanalih z lastno utežjo', () => {
+    const ch = defaultChannels().find((c) => c.id === 'path-comfort');
+    expect(ch).toBeTruthy();
+    expect(ch!.enabled).toBe(true);
+    expect(ch!.prior).toBeGreaterThan(0);
+    expect(ch!.confidence).toBeGreaterThan(0);
+  });
+
+  it('oceni manj udobja pri večji želeni širini (mehko, ne trdo)', () => {
+    const lib = baseLib();
+    const door = doorRects(lib.door, 'N', 100, 0, 'outward', 2000, 2000);
+    const sink = placeRects(lib.sink, 'S', 200, 2000, 2000);
+    const cand: LayoutCandidate = {
+      placed: [{ ...door, el: lib.door, name: 'Vrata' }, { ...sink, el: lib.sink, wall: 'S', name: 'Umivalnik' }] as any,
+      ev: { valid: true, viol: [], halo: 0, overlaps: [], aisle: 1000, drain: 0, score: 0.5 },
+    };
+    const tight = measureChannel('path-comfort', cand, { W: 2000, D: 2000, wetWall: 'S', minAisle: 800, pathWant: 400 });
+    const generous = measureChannel('path-comfort', cand, { W: 2000, D: 2000, wetWall: 'S', minAisle: 800, pathWant: 2000 });
+
+    expect(tight).toBeGreaterThan(0);
+    expect(tight).toBeGreaterThanOrEqual(generous); // večja želena = težje udobje = nižja ocena
+  });
+
+  it('učenje premakne LEARNED tudi za path-comfort (prior ostane)', () => {
+    const channels = defaultChannels();
+    const lib = baseLib();
+    const door = doorRects(lib.door, 'N', 100, 0, 'outward', 2000, 2000);
+    const a = placeRects(lib.sink, 'S', 200, 2000, 2000);
+    const b = placeRects(lib.sink, 'N', 200, 2000, 2000);
+    const cfg = { W: 2000, D: 2000, wetWall: 'S' as const, minAisle: 800, pathWant: 900 };
+    const mk = (fx: any): LayoutCandidate => ({ placed: [{ ...door, el: lib.door, name: 'Vrata' }, { ...fx, el: lib.sink, wall: fx.wall, name: 'Umivalnik' }] as any, ev: { valid: true, viol: [], halo: 0, overlaps: [], aisle: 1000, drain: 0, score: 0.5 } });
+    const before = channels.find((c) => c.id === 'path-comfort')!;
+    const after = learnChannelsFromPreference(channels, mk({ ...a, wall: 'S' }), mk({ ...b, wall: 'N' }), cfg).find((c) => c.id === 'path-comfort')!;
+    expect(after.prior).toBe(before.prior);
   });
 });
 

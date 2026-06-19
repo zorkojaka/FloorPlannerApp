@@ -4,7 +4,8 @@ import type { PlacedDoor, PlacedFixture } from './evaluator';
 import type { Box3D } from './volume';
 import { distanceToWall } from './geometry';
 import { elementBox, humanUsageBox } from './volume';
-import { buildFreeGrid, corridorWidth } from './freespace';
+import { buildFreeGrid, corridorWidth, findPath } from './freespace';
+import { doorInteriorPoint, usagePoint } from './evaluator';
 
 export type ChannelFamily = 'distance' | 'relational' | 'topology' | 'distribution' | 'alignment';
 export type ChannelScope = 'global' | 'room-type';
@@ -84,6 +85,16 @@ export function defaultChannels(): Channel[] {
       learned: 0.12,
       confidence: 0.45,
     },
+    {
+      id: 'path-comfort',
+      name: 'Udobje poti (želena širina)',
+      family: 'topology',
+      scope: 'room-type',
+      enabled: true,
+      prior: 0.18,
+      learned: 0.18,
+      confidence: 0.4,
+    },
   ];
 }
 
@@ -106,7 +117,10 @@ export function scoreCandidateChannels(candidate: LayoutCandidate, channels: Cha
 }
 
 export function rankByChannels(candidates: LayoutCandidate[], channels: Channel[], cfg: RoomConfig): LayoutCandidate[] {
-  return [...candidates].sort((a, b) => scoreCandidateChannels(b, channels, cfg).total - scoreCandidateChannels(a, channels, cfg).total);
+  // oceni vsakega kandidata ENKRAT (path-comfort je dražji: mreža + A*), nato sortiraj
+  const scored = candidates.map((candidate) => ({ candidate, total: scoreCandidateChannels(candidate, channels, cfg).total }));
+  scored.sort((a, b) => b.total - a.total);
+  return scored.map((entry) => entry.candidate);
 }
 
 export function learnChannelsFromPreference(channels: Channel[], selected: LayoutCandidate, rejected: LayoutCandidate, cfg: RoomConfig): Channel[] {
@@ -128,6 +142,7 @@ export function measureChannel(channelId: string, candidate: LayoutCandidate, cf
   if (channelId === 'space-distribution') return measureSpaceDistribution(candidate, cfg);
   if (channelId === 'passing-while-used') return measurePassingWhileUsed(candidate, cfg);
   if (channelId === 'daylight-access') return measureDaylightAccess(candidate, cfg);
+  if (channelId === 'path-comfort') return measurePathComfort(candidate, cfg);
   return candidate.ev.score;
 }
 
@@ -223,6 +238,27 @@ function measureDaylightAccess(candidate: LayoutCandidate, cfg: RoomConfig): num
     return sum + nearest;
   }, 0) / users.length;
   return 1 - Math.min(1, average / diagonal);
+}
+
+// Udobje poti (mehko, rang 2): koliko najožja dejanska pot od vrat do uporabne
+// točke vsakega elementa doseže ŽELENO širino (cfg.pathWant). 1 = vse poti udobne,
+// 0 = kakšna pot ni dosegljiva. Polnopravni kanal — utež (prior/learned/zaupanje)
+// se nastavlja na testni mizi kot pri ostalih.
+function measurePathComfort(candidate: LayoutCandidate, cfg: RoomConfig): number {
+  const want = cfg.pathWant ?? 900;
+  const items = fixtures(candidate);
+  const door = candidate.placed.find((item): item is PlacedDoor => item.kind === 'door');
+  if (!door || items.length === 0) return 1;
+
+  const grid = buildFreeGrid(cfg.W, cfg.D, items.map(elementBox));
+  const entry = doorInteriorPoint(door);
+  let min = Infinity;
+  for (const item of items) {
+    const result = findPath(grid, entry, usagePoint(item), 100);
+    if (!result.reachable) return 0;
+    if (result.minWidth < min) min = result.minWidth;
+  }
+  return min === Infinity ? 1 : Math.max(0, Math.min(1, min / Math.max(want, 1)));
 }
 
 function centerDistance(a: PlacedFixture, b: PlacedFixture): number {

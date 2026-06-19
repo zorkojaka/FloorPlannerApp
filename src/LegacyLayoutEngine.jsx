@@ -325,6 +325,9 @@ function useRoomProject(library){
   const [channels,setChannels]=usePersistentState("floorplanner.channels",defaultChannels);
   useEffect(()=>setChannels(C=>normalizeChannels(C)),[setChannels]);
   const cfg=useMemo(()=>({W,D,wetWall:wet,minAisle:800}),[W,D,wet]);
+  // ločen cfg za rangiranje: nosi želeno širino (bere jo kanal path-comfort).
+  // Generiranje uporablja `cfg` brez pathWant → mehka želena NE regenerira bazena.
+  const scoreCfg=useMemo(()=>({...cfg,pathWant}),[cfg,pathWant]);
   const feasibility=useMemo(()=>checkFeasibility(library,prog,cfg,zones),[library,prog,cfg,zones]);
 
   useEffect(()=>{
@@ -338,12 +341,12 @@ function useRoomProject(library){
   // ŽIVO rangiranje po testni mizi: bazen razvrsti po preferenci + kanalih sproti,
   // zato izklop kanala / premik priorja / drsnik zaupanja takoj spremenijo, kateri
   // je "best" in vrstni red sličic — kanali dejansko vplivajo, ne le rišejo.
-  const ranked=useMemo(()=>rankByChannels(rankByPreference(pool,pref.weights),channels,cfg),[pool,channels,pref.weights,cfg]);
+  const ranked=useMemo(()=>rankByChannels(rankByPreference(pool,pref.weights),channels,scoreCfg),[pool,channels,pref.weights,scoreCfg]);
   const best=ranked[idx];
   const [explore,setExplore]=usePersistentState("floorplanner.explore",0.7);
-  const abPair=useMemo(()=>nextPair(ranked,channels,cfg,explore),[ranked,channels,cfg,explore]);
+  const abPair=useMemo(()=>nextPair(ranked,channels,scoreCfg,explore),[ranked,channels,scoreCfg,explore]);
   const optionA=abPair?.a, optionB=abPair?.b;
-  const bestChannelScores=best?scoreCandidateChannels(best,channels,cfg):null;
+  const bestChannelScores=best?scoreCandidateChannels(best,channels,scoreCfg):null;
   const routing=useMemo(()=>best?routeServices(best.placed,cfg,{allowFloorRoutes}):null,[best,cfg,allowFloorRoutes]);
   // Poti so trak širine = minimalna (trdo). Trasa od vrat do uporabne točke vsakega
   // elementa; najožja točka in mesto blokade so del rezultata (steklena škatla).
@@ -367,7 +370,7 @@ function useRoomProject(library){
   const choosePreference=(selected,rejected)=>setPref(prev=>{
     const next=recordPreference(prev,selected,rejected);
     // učenje posodobi LEARNED (ne prior); živo rangiranje (ranked memo) takoj prevzame
-    setChannels(C=>learnChannelsFromPreference(C,selected,rejected,cfg));
+    setChannels(C=>learnChannelsFromPreference(C,selected,rejected,scoreCfg));
     setIdx(0);
     return next;
   });

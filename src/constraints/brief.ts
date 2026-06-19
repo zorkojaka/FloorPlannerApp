@@ -6,6 +6,7 @@ export interface RoomConfig {
   D: number;
   wetWall: Wall;
   minAisle: number;
+  pathWant?: number; // želena širina poti (mehko) — bere jo kanal path-comfort
 }
 
 /**
