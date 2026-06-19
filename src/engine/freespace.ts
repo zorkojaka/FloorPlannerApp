@@ -116,6 +116,12 @@ function cellIndex(grid: FreeGrid, point: Point): { c: number; r: number } {
   return { c, r };
 }
 
+function cellCenter(grid: FreeGrid, index: number): Point {
+  const c = index % grid.cols;
+  const r = Math.floor(index / grid.cols);
+  return { x: (c + 0.5) * grid.cell, y: (r + 0.5) * grid.cell };
+}
+
 /**
  * Poišče najbližjo celico okrog dane točke, ki prenese telo polmera `radius`
  * (clearance ≥ radius). Spiralno iskanje navzven do `maxRings` celic.
@@ -169,6 +175,101 @@ export function reachable(grid: FreeGrid, from: Point, to: Point, passWidth = RA
     }
   }
   return false;
+}
+
+export interface PathResult {
+  reachable: boolean;
+  path: Point[]; // narisljiva trasa (od → do), [] če celo izhodišča ni
+  minWidth: number; // najožja širina koridorja vzdolž poti (mm)
+  narrowest: Point | null; // mesto najožje točke
+  blockedAt: Point | null; // kje se pot zatakne (najbližji doseg cilju), če ni prehodna
+}
+
+/**
+ * Rang 1 kot VIDNI objekt (steklena škatla): vrne dejansko traso od `from` do
+ * `to` skozi prosti prostor (BFS po celicah s clearance ≥ passWidth/2), najožjo
+ * točko vzdolž nje, ali — ob neprehodnosti — mesto, kjer se pot zatakne.
+ */
+export function findPath(grid: FreeGrid, from: Point, to: Point, passWidth = RANK1_PASS_WIDTH): PathResult {
+  const radius = passWidth / 2;
+  const start = nearestPassable(grid, from, radius);
+  const goal = nearestPassable(grid, to, radius);
+  if (start === null) return { reachable: false, path: [], minWidth: 0, narrowest: null, blockedAt: from };
+  if (goal === null) return { reachable: false, path: [], minWidth: 0, narrowest: null, blockedAt: to };
+
+  const parent = new Int32Array(grid.cols * grid.rows).fill(-1);
+  const visited = new Uint8Array(grid.cols * grid.rows);
+  const queue: number[] = [start];
+  visited[start] = 1;
+  const neighbours = [-1, 1, -grid.cols, grid.cols, -grid.cols - 1, -grid.cols + 1, grid.cols - 1, grid.cols + 1];
+
+  let reached = false;
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (current === goal) {
+      reached = true;
+      break;
+    }
+    const cc = current % grid.cols;
+    for (const offset of neighbours) {
+      const next = current + offset;
+      if (next < 0 || next >= grid.clearance.length || visited[next]) continue;
+      if (Math.abs((next % grid.cols) - cc) > 1) continue;
+      if (grid.clearance[next] < radius) continue;
+      visited[next] = 1;
+      parent[next] = current;
+      queue.push(next);
+    }
+  }
+
+  if (!reached) {
+    // najbližji obiskani celici cilju = kje se pot zatakne
+    let closest = start;
+    let bestDist = Infinity;
+    const goalPt = cellCenter(grid, goal);
+    for (let i = 0; i < visited.length; i += 1) {
+      if (!visited[i]) continue;
+      const p = cellCenter(grid, i);
+      const dist = Math.hypot(p.x - goalPt.x, p.y - goalPt.y);
+      if (dist < bestDist) {
+        bestDist = dist;
+        closest = i;
+      }
+    }
+    return { reachable: false, path: [], minWidth: 0, narrowest: null, blockedAt: cellCenter(grid, closest) };
+  }
+
+  const cells: number[] = [];
+  for (let i = goal; i !== -1; i = parent[i]) cells.push(i);
+  cells.reverse();
+
+  let minWidth = Infinity;
+  let narrowest: Point | null = null;
+  for (const cell of cells) {
+    const width = grid.clearance[cell] * 2;
+    if (width < minWidth) {
+      minWidth = width;
+      narrowest = cellCenter(grid, cell);
+    }
+  }
+
+  const path = simplify([from, ...cells.map((cell) => cellCenter(grid, cell)), to]);
+  return { reachable: true, path, minWidth: minWidth === Infinity ? 0 : minWidth, narrowest, blockedAt: null };
+}
+
+// odstrani kolinearne vmesne točke, da je trasa berljiva
+function simplify(points: Point[]): Point[] {
+  if (points.length <= 2) return points;
+  const out: Point[] = [points[0]];
+  for (let i = 1; i < points.length - 1; i += 1) {
+    const a = out[out.length - 1];
+    const b = points[i];
+    const c = points[i + 1];
+    const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    if (Math.abs(cross) > 1) out.push(b);
+  }
+  out.push(points[points.length - 1]);
+  return out;
 }
 
 /**

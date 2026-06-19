@@ -183,13 +183,13 @@ export function evalPlace(
 }
 
 // Vstopna točka skozi vrata: sredina prehodnega pasu, znotraj sobe.
-function doorInteriorPoint(door: PlacedDoor): Point {
+export function doorInteriorPoint(door: PlacedDoor): Point {
   return { x: door.pass.x + door.pass.w / 2, y: door.pass.y + door.pass.h / 2 };
 }
 
 // Uporabna točka elementa: sredina človeškega kvadra (sprednji rob) če ima
 // uporabnika, sicer sredina odtisa (okno, polica ipd.).
-function usagePoint(fixture: PlacedFixture): Point {
+export function usagePoint(fixture: PlacedFixture): Point {
   const human = humanUsageBox(fixture);
   if (human) return { x: human.x + human.w / 2, y: human.y + human.h / 2 };
   return { x: fixture.foot.x + fixture.foot.w / 2, y: fixture.foot.y + fixture.foot.h / 2 };

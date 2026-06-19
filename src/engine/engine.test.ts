@@ -14,7 +14,8 @@ import { measureGeneralization, measureInductionHoldout, measurePreferenceGain }
 import { loadJson, saveJson, type JsonStorage } from '../shared/storage';
 import { defaultChannels, effectiveWeight, learnChannelsFromPreference, rankByChannels } from './channels';
 import { collides3D, humanUsageBox, overlapVolume } from './volume';
-import { buildFreeGrid, corridorWidth, reachable } from './freespace';
+import { buildFreeGrid, corridorWidth, findPath, reachable } from './freespace';
+import { meetingWidthFor, pathWidthFor, TRAFFIC_PROFILES, trafficProfile } from './traffic';
 import { nextPair, pairInformation, suggestedExplore } from './active';
 import { fromRoomConstraints, type RoomConstraints } from '../constraints/brief';
 
@@ -429,6 +430,59 @@ describe('3.0 walkability (rang 1 prehodnost)', () => {
     const from = { x: 1500, y: 300 };
     const to = { x: 1500, y: 2700 };
     expect(corridorWidth(open, from, to)).toBeGreaterThan(corridorWidth(narrow, from, to));
+  });
+});
+
+describe('5.0 traffic profiles', () => {
+  it('derives rang-1 path width from the unit profile, plus optional extra', () => {
+    expect(pathWidthFor(TRAFFIC_PROFILES.pedestrian)).toBe(600);
+    expect(pathWidthFor(TRAFFIC_PROFILES.pedestrian, 200)).toBe(800);
+    expect(pathWidthFor(TRAFFIC_PROFILES.forklift)).toBeGreaterThan(pathWidthFor(TRAFFIC_PROFILES.pedestrian));
+  });
+
+  it('rang-2 meeting width is two profiles wide', () => {
+    expect(meetingWidthFor(TRAFFIC_PROFILES.pedestrian)).toBe(1200);
+  });
+
+  it('falls back to the pedestrian profile for unknown ids', () => {
+    expect(trafficProfile('nope').id).toBe('pedestrian');
+    expect(trafficProfile('forklift').id).toBe('forklift');
+  });
+});
+
+describe('5.0 path as a visible object', () => {
+  it('returns a drawable path and a narrowest point through open space', () => {
+    const grid = buildFreeGrid(3000, 3000, []);
+    const result = findPath(grid, { x: 300, y: 300 }, { x: 2700, y: 2700 }, 600);
+
+    expect(result.reachable).toBe(true);
+    expect(result.path.length).toBeGreaterThanOrEqual(2);
+    expect(result.minWidth).toBeGreaterThan(0);
+    expect(result.narrowest).not.toBeNull();
+    expect(result.blockedAt).toBeNull();
+  });
+
+  it('reports the blockage location when the path is cut off', () => {
+    const grid = buildFreeGrid(3000, 3000, [{ x: 0, y: 1400, w: 3000, h: 200, z: 0, h3: 2000 }]);
+    const result = findPath(grid, { x: 1500, y: 300 }, { x: 1500, y: 2700 }, 600);
+
+    expect(result.reachable).toBe(false);
+    expect(result.path).toHaveLength(0);
+    expect(result.blockedAt).not.toBeNull();
+    expect(result.blockedAt!.y).toBeLessThan(1400); // zatakne se pred pregrado
+  });
+
+  it('a wider profile needs a wider corridor (forklift fails a pedestrian gap)', () => {
+    const gap = [
+      { x: 0, y: 1400, w: 1100, h: 200, z: 0, h3: 2000 },
+      { x: 1900, y: 1400, w: 1100, h: 200, z: 0, h3: 2000 },
+    ];
+    const grid = buildFreeGrid(3000, 3000, gap);
+    const from = { x: 1500, y: 300 };
+    const to = { x: 1500, y: 2700 };
+
+    expect(findPath(grid, from, to, pathWidthFor(TRAFFIC_PROFILES.pedestrian)).reachable).toBe(true);
+    expect(findPath(grid, from, to, pathWidthFor(TRAFFIC_PROFILES.forklift)).reachable).toBe(false);
   });
 });
 

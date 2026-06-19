@@ -7,6 +7,10 @@ import { routeServices } from "./engine/routing";
 import { checkFeasibility } from "./engine/feasibility";
 import { initialPreferenceState, rankByPreference, recordPreference } from "./engine/preference";
 import { nextPair, suggestedExplore } from "./engine/active";
+import { buildFreeGrid, findPath } from "./engine/freespace";
+import { elementBox } from "./engine/volume";
+import { doorInteriorPoint, usagePoint } from "./engine/evaluator";
+import { trafficProfile, pathWidthFor, TRAFFIC_PROFILES } from "./engine/traffic";
 import { measureGeneralization, measureInductionHoldout, measurePreferenceGain } from "./engine/metrics";
 import { defaultChannels, effectiveWeight, learnChannelsFromPreference, rankByChannels, scoreCandidateChannels } from "./engine/channels";
 import { applyInducedRules, induceRules, parseReferenceJson } from "./rules/induction";
@@ -335,6 +339,19 @@ function useRoomProject(library){
   const optionA=abPair?.a, optionB=abPair?.b;
   const bestChannelScores=best?scoreCandidateChannels(best,channels,cfg):null;
   const routing=useMemo(()=>best?routeServices(best.placed,cfg,{allowFloorRoutes}):null,[best,cfg,allowFloorRoutes]);
+  const [profileId,setProfileId]=usePersistentState("floorplanner.profile","pedestrian");
+  const [showPaths,setShowPaths]=usePersistentState("floorplanner.showPaths",true);
+  const profile=trafficProfile(profileId);
+  const paths=useMemo(()=>{
+    if(!best) return [];
+    const fixtures=best.placed.filter(p=>p.kind!=="door");
+    const door=best.placed.find(p=>p.kind==="door");
+    if(!door||fixtures.length===0) return [];
+    const grid=buildFreeGrid(W,D,fixtures.map(elementBox));
+    const entry=doorInteriorPoint(door);
+    const width=pathWidthFor(profile);
+    return fixtures.map(f=>({name:f.name,...findPath(grid,entry,usagePoint(f),width)}));
+  },[best,W,D,profileId]);
   const choosePreference=(selected,rejected)=>setPref(prev=>{
     const next=recordPreference(prev,selected,rejected);
     const learnedChannels=learnChannelsFromPreference(channels,selected,rejected,cfg);
@@ -347,7 +364,8 @@ function useRoomProject(library){
   const setInst=(id,patch)=>setProg(P=>P.map(p=>p.id===id?{...p,...patch}:p));
   return {W,setW,D,setD,wet,setWet,prog,setProg,setInst,soft,setSoft,allowFloorRoutes,setAllowFloorRoutes,zones,setZones,setZone,
     pool,idx,setIdx,seed,setSeed,pref,channels,setChannel,cfg,feasibility,cornerEls,hasDoor,best,explore,setExplore,
-    abPair,optionA,optionB,bestChannelScores,routing,choosePreference};
+    abPair,optionA,optionB,bestChannelScores,routing,choosePreference,
+    profileId,setProfileId,profile,showPaths,setShowPaths,paths};
 }
 
 // O2 v pogledu orehov (testna miza): vse troje hkrati, kot prej.
@@ -362,7 +380,7 @@ function O2({library}){
 
 /* ===== Korak 2 — omejitve sobe (leva polovica nekdanjega O2) ===== */
 function ConstraintsPanel({rp,library}){
-  const {W,setW,D,setD,wet,setWet,prog,setProg,setInst,soft,setSoft,allowFloorRoutes,setAllowFloorRoutes,zones,setZones,setZone,hasDoor,cornerEls,feasibility,setSeed}=rp;
+  const {W,setW,D,setD,wet,setWet,prog,setProg,setInst,soft,setSoft,allowFloorRoutes,setAllowFloorRoutes,zones,setZones,setZone,hasDoor,cornerEls,feasibility,setSeed,profileId,setProfileId,profile,showPaths,setShowPaths}=rp;
   return (
     <aside className="col">
       <div className="eyebrow">Prostor</div>
@@ -404,6 +422,10 @@ function ConstraintsPanel({rp,library}){
       <div className="softNote">{soft?"Halo se sme prekriti (kazen). Lok vrat ostane TRDO pravilo - vanj nikoli.":"Strogo: vsako prekrivanje halo = zavrnitev."}</div>
       <label className="softTgl"><input type="checkbox" checked={allowFloorRoutes} onChange={e=>setAllowFloorRoutes(e.target.checked)}/> <span>O5: talne trase dovoljene</span></label>
       <div className="softNote">{allowFloorRoutes?"Priklopi, ki vodijo v tla, se trasirajo naravnost po plošči.":"Priklopi v tla se preusmerijo po steni (obodu) do mokrega zidu - daljša trasa, brez prebijanja plošče."}</div>
+      <div className="eyebrow mt">Profil prometa</div>
+      <div className="addRow">{Object.values(TRAFFIC_PROFILES).map(p=><button key={p.id} className={profileId===p.id?"on":""} onClick={()=>setProfileId(p.id)}>{p.name} <span className="mono">{p.w}×{p.d}{p.turningRadius?` · r${p.turningRadius}`:""}</span></button>)}</div>
+      <div className="softNote">Pot mora prenesti enoto profila ({profile.w} mm široko). Pešec = privzeto; viličar/voziček/paleta raztegnejo isti engine v proizvodno domeno.</div>
+      <label className="softTgl"><input type="checkbox" checked={showPaths} onChange={e=>setShowPaths(e.target.checked)}/> <span>Pokaži poti (vrata → element)</span></label>
       <button className="regen" onClick={()=>setSeed(s=>s+1)}>↻ Generiraj</button>
     </aside>
   );
@@ -411,11 +433,11 @@ function ConstraintsPanel({rp,library}){
 
 /* ===== Korak 3 (a) — oder z razporeditvijo in poolom ===== */
 function StagePanel({rp}){
-  const {best,cfg,zones,routing,feasibility,hasDoor,soft,pool,idx,setIdx}=rp;
+  const {best,cfg,zones,routing,feasibility,hasDoor,soft,pool,idx,setIdx,paths,showPaths}=rp;
   return (
     <main className="cstage">
-      <div className="legend mono"><span><i style={{background:"#2b3138"}}/>oprema</span><span><i style={{background:"#e2553f"}}/>jedro</span><span><i style={{background:"#d9a23b",opacity:.5}}/>halo</span><span><i style={{background:"#c0392b"}}/>halo prekrit</span><span><i style={{background:"#5aa9e6"}}/>lok vrat</span><span><i style={{background:"#16b3b3"}}/>mokri zid</span><span><i style={{background:"#3f86c9"}}/>O5 zid</span><span><i style={{background:"#d9a23b"}}/>O5 tla</span></div>
-      <div className="sheet">{best? <O2Plan cand={best} cfg={cfg} zones={zones} routing={routing}/> : <div className="noRes">{!feasibility.feasible?<>Brief ni izvedljiv:<br/>{feasibility.reasons.join(" · ")}</>:!hasDoor?"Dodaj vrata - soba brez vrat nima veljavne rešitve.":soft?"Ni veljavne razporeditve ob teh omejitvah. Povečaj prostor ali zrahljaj zahteve.":"V strogem načinu ni rešitve - vklopi mehka pravila."}</div>}</div>
+      <div className="legend mono"><span><i style={{background:"#2b3138"}}/>oprema</span><span><i style={{background:"#e2553f"}}/>jedro</span><span><i style={{background:"#d9a23b",opacity:.5}}/>halo</span><span><i style={{background:"#c0392b"}}/>halo prekrit</span><span><i style={{background:"#5aa9e6"}}/>lok vrat</span><span><i style={{background:"#16b3b3"}}/>mokri zid</span><span><i style={{background:"#5bbd8b"}}/>pot</span><span><i style={{background:"#e2553f"}}/>blokada</span></div>
+      <div className="sheet">{best? <O2Plan cand={best} cfg={cfg} zones={zones} routing={routing} paths={showPaths?paths:[]}/> : <div className="noRes">{!feasibility.feasible?<>Brief ni izvedljiv:<br/>{feasibility.reasons.join(" · ")}</>:!hasDoor?"Dodaj vrata - soba brez vrat nima veljavne rešitve.":soft?"Ni veljavne razporeditve ob teh omejitvah. Povečaj prostor ali zrahljaj zahteve.":"V strogem načinu ni rešitve - vklopi mehka pravila."}</div>}</div>
       <div className="poolBar">{pool.length>0 && <><span className="mono">{pool.length} veljavnih</span>{pool.slice(0,8).map((c,i)=><button key={i} className={"thumb "+(idx===i?"on":"")} onClick={()=>setIdx(i)}><span className="mono">{(c.ev.score*100|0)}</span></button>)}</>}</div>
     </main>
   );
@@ -423,7 +445,7 @@ function StagePanel({rp}){
 
 /* ===== Korak 3 (b) — preverba, instalacije, A/B aktivno učenje, kanali ===== */
 function ReviewPanel({rp}){
-  const {best,cfg,routing,optionA,optionB,abPair,explore,setExplore,pref,channels,setChannel,bestChannelScores,choosePreference}=rp;
+  const {best,cfg,routing,optionA,optionB,abPair,explore,setExplore,pref,channels,setChannel,bestChannelScores,choosePreference,paths,profile}=rp;
   return (
     <aside className="col">
       {best? <>
@@ -443,6 +465,14 @@ function ReviewPanel({rp}){
           <span>{r.fixtureName} · {CONN[r.connection.type].short} · {r.via==="floor"?"tla":r.rerouted?"zid (preusmerjeno)":"zid"}</span>
           <b className="mono">{(r.length/1000).toFixed(2)} m</b>
         </div>)}</div>
+        <div className="eyebrow mt">Poti · rang 1 ({profile.name})</div>
+        {paths.length>0 ? <div className="routeList">{paths.map((pt,i)=>(
+          <div key={i} className="routeItem" style={pt.reachable?{}:{borderColor:"#7a3028",color:"#f08a78"}}>
+            <span>{pt.name} · {pt.reachable?"prehodno":"NI POTI"}</span>
+            <b className="mono">{pt.reachable?Math.round(pt.minWidth)+" mm":"blok"}</b>
+          </div>
+        ))}</div> : <div className="soft2 none">Ni elementov za pot.</div>}
+        <div className="softNote">Najožja širina mora prenesti profil ({pathWidthFor(profile)} mm). Rang 2 (srečanje dveh) = 2× profil.</div>
         <div className="eyebrow mt">A/B preference · aktivno učenje</div>
         {optionA&&optionB ? <div className="abBox">
           <div className="abBtns">
@@ -485,7 +515,7 @@ function ReviewPanel({rp}){
   );
 }
 
-function O2Plan({cand,cfg,zones,routing}){ const {W,D,wetWall}=cfg; const PAD=900; const we=wallEdge(wetWall,W,D);
+function O2Plan({cand,cfg,zones,routing,paths=[]}){ const {W,D,wetWall}=cfg; const PAD=900; const we=wallEdge(wetWall,W,D);
   return <svg viewBox={`${-PAD} ${-PAD} ${W+PAD*2} ${D+PAD*2}`} style={{width:"100%",height:"100%"}}>
     <defs><pattern id="hh" width="80" height="80" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="80" stroke="#d9a23b" strokeWidth="12" opacity=".5"/></pattern>
     <pattern id="nogo" width="70" height="70" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="70" stroke="#e2553f" strokeWidth="16" opacity=".55"/></pattern></defs>
@@ -509,6 +539,20 @@ function O2Plan({cand,cfg,zones,routing}){ const {W,D,wetWall}=cfg; const PAD=90
     {cand.placed.filter(p=>p.kind!=="door").map((p,i)=><rect key={"h"+i} x={p.hard.x} y={p.hard.y} width={p.hard.w} height={p.hard.h} fill="#e2553f" opacity=".14" stroke="#e2553f" strokeWidth="20"/>)}
     {cand.placed.filter(p=>p.kind!=="door").map((p,i)=><g key={"f"+i}><rect x={p.foot.x} y={p.foot.y} width={p.foot.w} height={p.foot.h} rx="26" fill="#dfe6df" stroke="#2b3138" strokeWidth="30"/>
       <text x={p.foot.x+p.foot.w/2} y={p.foot.y+p.foot.h/2} fill="#3a444f" fontSize="115" fontFamily="ui-sans-serif,system-ui" textAnchor="middle" dy="40">{p.name}</text></g>)}
+    {paths.map((pt,i)=>pt.reachable
+      ? <g key={"p"+i}>
+          <polyline points={pt.path.map(p=>`${p.x},${p.y}`).join(" ")} fill="none" stroke="#3f7d5e" strokeWidth="26" strokeDasharray="10 48" strokeLinecap="round" strokeLinejoin="round" opacity=".92"/>
+          {pt.narrowest&&<g>
+            <circle cx={pt.narrowest.x} cy={pt.narrowest.y} r="48" fill="none" stroke="#3f7d5e" strokeWidth="16"/>
+            <text x={pt.narrowest.x} y={pt.narrowest.y} dy="-72" fill="#2f5e46" fontSize="92" fontFamily="ui-monospace,Menlo,monospace" textAnchor="middle">{Math.round(pt.minWidth)}</text>
+          </g>}
+        </g>
+      : <g key={"p"+i}>{pt.blockedAt&&<g>
+          <line x1={pt.blockedAt.x-78} y1={pt.blockedAt.y-78} x2={pt.blockedAt.x+78} y2={pt.blockedAt.y+78} stroke="#e2553f" strokeWidth="28" strokeLinecap="round"/>
+          <line x1={pt.blockedAt.x-78} y1={pt.blockedAt.y+78} x2={pt.blockedAt.x+78} y2={pt.blockedAt.y-78} stroke="#e2553f" strokeWidth="28" strokeLinecap="round"/>
+          <text x={pt.blockedAt.x} y={pt.blockedAt.y} dy="-108" fill="#b03a2e" fontSize="86" fontFamily="ui-sans-serif,system-ui" textAnchor="middle">{pt.name}: ni poti</text>
+        </g>}</g>
+    )}
     {cand.placed.filter(p=>p.kind==="door").map((p,i)=><Door key={"d"+i} p={p} W={W} D={D}/>)}
   </svg>;
 }
@@ -594,7 +638,7 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .add{background:var(--bg);border:1px dashed var(--bd);color:var(--mut);margin-top:2px}.add:hover{border-color:var(--cy);color:var(--cy)}
 .reset,.regen{background:var(--p2);border:1px solid var(--bd);color:var(--tx);margin-top:14px}.reset:hover,.regen:hover{border-color:var(--cy)}
 .oriBar{margin:12px 16px;padding:11px 14px;border-radius:9px;background:#0e2626;border:1px solid #16494933;color:#7fdede;font-size:12px;line-height:1.45}.oriBar.warn{background:#2a1410;border-color:#5a2a22;color:#f08a78}
-.addRow{display:flex;flex-direction:column;gap:5px;margin-bottom:9px}.addRow button{background:var(--bg);border:1px solid var(--bd);color:var(--mut);padding:7px;border-radius:7px;font-size:11.5px;cursor:pointer;text-align:left}.addRow button:hover{border-color:var(--cy);color:var(--cy)}
+.addRow{display:flex;flex-direction:column;gap:5px;margin-bottom:9px}.addRow button{background:var(--bg);border:1px solid var(--bd);color:var(--mut);padding:7px;border-radius:7px;font-size:11.5px;cursor:pointer;text-align:left;display:flex;justify-content:space-between;gap:8px;align-items:center}.addRow button:hover{border-color:var(--cy);color:var(--cy)}.addRow button.on{border-color:var(--cy);color:var(--cy);background:#0e2626}.addRow button .mono{font-size:9.5px;color:var(--mut)}
 .progList{display:flex;flex-direction:column;gap:5px}.pItem{display:flex;flex-direction:column;background:var(--p2);border:1px solid var(--bd);border-radius:7px;padding:7px 10px;font-size:12px}.pItem button{background:none;border:none;color:var(--mut);cursor:pointer;font-size:15px}
 .pItem.door{border-color:#2f4a63}
 .pTop{display:flex;justify-content:space-between;align-items:center}
