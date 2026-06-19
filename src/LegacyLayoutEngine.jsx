@@ -84,8 +84,8 @@ function Workflow({library,setLibrary}){
     {phase==="korak3" && <div className="phaseBody">
       <div className="phaseLead">Korak 3 — generiranje in izbiranje: engine vrže variacije, ti izbiraš boljše. A/B par izbere aktivno učenje (»Ugani kdo«) po informacijskem donosu.</div>
       <div className="grid2c wide">
-        <StagePanel rp={rp} library={library}/>
-        <ReviewPanel rp={rp}/>
+        <ABStagePanel rp={rp}/>
+        <ReviewPanel rp={rp} showAB={false} showBench={false}/>
       </div>
     </div>}
   </div>;
@@ -373,7 +373,19 @@ function useRoomProject(library){
   const ranked=useMemo(()=>rankByChannels(rankByPreference(pool,pref.weights),channels,scoreCfg),[pool,channels,pref.weights,scoreCfg]);
   const best=ranked[idx];
   const [explore,setExplore]=usePersistentState("floorplanner.explore",0.7);
-  const abPair=useMemo(()=>nextPair(ranked,channels,scoreCfg,explore),[ranked,channels,scoreCfg,explore]);
+  const [dismissedPairs,setDismissedPairs]=useState([]);
+  const abPair=useMemo(()=>{
+    let candidates=ranked;
+    for(let attempt=0;attempt<Math.max(1,ranked.length-1);attempt++){
+      const pair=nextPair(candidates,channels,scoreCfg,explore);
+      if(!pair)return null;
+      const key=pairKey(pair.a,pair.b);
+      if(!dismissedPairs.includes(key))return pair;
+      candidates=candidates.filter(c=>candidateKey(c)!==candidateKey(pair.b));
+      if(candidates.length<2)break;
+    }
+    return nextPair(ranked,channels,scoreCfg,explore);
+  },[ranked,channels,scoreCfg,explore,dismissedPairs]);
   const optionA=abPair?.a, optionB=abPair?.b;
   const bestChannelScores=best?scoreCandidateChannels(best,channels,scoreCfg):null;
   const routing=useMemo(()=>best?routeServices(best.placed,cfg,{allowFloorRoutes}):null,[best,cfg,allowFloorRoutes]);
@@ -396,19 +408,31 @@ function useRoomProject(library){
     const minW=Math.min(...reach.map(p=>p.minWidth));
     return {minWidth:minW, allOk:reach.length===paths.length, ratio:Math.max(0,Math.min(1,minW/Math.max(pathWant,1)))};
   },[paths,pathWant]);
-  const choosePreference=(selected,rejected)=>setPref(prev=>{
-    const next=recordPreference(prev,selected,rejected);
-    // učenje posodobi LEARNED (ne prior); živo rangiranje (ranked memo) takoj prevzame
-    setChannels(C=>learnChannelsFromPreference(C,selected,rejected,scoreCfg));
-    setIdx(0);
-    return next;
-  });
+  const choosePreference=(selected,rejected)=>{
+    setDismissedPairs(P=>[...P,pairKey(selected,rejected)]);
+    setPref(prev=>{
+      const next=recordPreference(prev,selected,rejected);
+      // učenje posodobi LEARNED (ne prior); živo rangiranje (ranked memo) takoj prevzame
+      setChannels(C=>learnChannelsFromPreference(C,selected,rejected,scoreCfg));
+      setIdx(0);
+      return next;
+    });
+  };
+  const chooseEqualPreference=(a,b)=>setDismissedPairs(P=>[...P,pairKey(a,b)]);
   const setChannel=(id,patch)=>setChannels(C=>C.map(c=>c.id===id?{...c,...patch}:c));
   const setInst=(id,patch)=>setProg(P=>P.map(p=>p.id===id?{...p,...patch}:p));
   return {W,setW,D,setD,wet,setWet,prog,setProg,setInst,soft,setSoft,allowFloorRoutes,setAllowFloorRoutes,zones,setZones,setZone,
     pool:ranked,idx,setIdx,seed,setSeed,pref,channels,setChannel,cfg,feasibility,cornerEls,hasDoor,best,explore,setExplore,
-    abPair,optionA,optionB,bestChannelScores,routing,choosePreference,
+    abPair,optionA,optionB,bestChannelScores,routing,choosePreference,chooseEqualPreference,
     pathMin,setPathMin,pathWant,setPathWant,showPaths,setShowPaths,paths,comfort};
+}
+
+function candidateKey(candidate){
+  return candidate.placed.map(p=>`${p.name}:${p.wall}:${Math.round(p.foot.x)}:${Math.round(p.foot.y)}:${p.kind==="door"?p.dir:""}`).join("|");
+}
+
+function pairKey(a,b){
+  return [candidateKey(a),candidateKey(b)].sort().join("::");
 }
 
 // O2 v pogledu orehov (testna miza): vse troje hkrati, kot prej.
@@ -503,6 +527,43 @@ function ConstraintsPanel({rp,library}){
 }
 
 /* ===== Korak 3 (a) — oder z razporeditvijo in poolom ===== */
+function ABStagePanel({rp}){
+  const {best,cfg,zones,optionA,optionB,abPair,choosePreference,chooseEqualPreference,pref,explore,setExplore,pathMin,pathWant,pool,idx,setIdx,allowFloorRoutes}=rp;
+  const routeOf=(cand)=>cand?routeServices(cand.placed,cfg,{allowFloorRoutes}):null;
+  return <main className="cstage abStage">
+    <div className="abProgress">
+      <span>Primerjave <b className="mono">{pref.comparisons}</b></span>
+      <span className={pref.converged?"conv on":"conv"}>{pref.converged?`konvergenca · ${pref.stableStreak}`:`stabilnost ${pref.stableStreak}`}</span>
+      <span>donos para <b className="mono">{abPair?Math.round(abPair.info*100):0}</b></span>
+      <label>raziskovanje <b className="mono">{Math.round(explore*100)}</b><input type="range" min="0" max="1" step="0.05" value={explore} onChange={e=>setExplore(+e.target.value)}/></label>
+      <button className="microBtn" onClick={()=>setExplore(suggestedExplore(pref.comparisons))}>predlagaj</button>
+    </div>
+    <div className="bestStrip">
+      <div className="abHead"><b>Trenutno najboljša</b><span className="mono">{best?(best.ev.score*100|0):"-"}</span></div>
+      <div className="bestMini">{best?<O2Plan cand={best} cfg={cfg} zones={zones} routing={routeOf(best)} paths={[]} bandMin={pathMin} bandWant={pathWant}/>:<div className="noRes">Ni veljavne rešitve.</div>}</div>
+    </div>
+    {optionA&&optionB ? <>
+      <div className="abCompare">
+        <ABPlanCard label="A" cand={optionA} cfg={cfg} zones={zones} routing={routeOf(optionA)} pathMin={pathMin} pathWant={pathWant}/>
+        <ABPlanCard label="B" cand={optionB} cfg={cfg} zones={zones} routing={routeOf(optionB)} pathMin={pathMin} pathWant={pathWant}/>
+      </div>
+      <div className="abChoiceBtns">
+        <button onClick={()=>choosePreference(optionA,optionB)}>A je boljša</button>
+        <button onClick={()=>chooseEqualPreference(optionA,optionB)}>enakovredni</button>
+        <button onClick={()=>choosePreference(optionB,optionA)}>B je boljša</button>
+      </div>
+    </> : <div className="noRes">Za A/B sta potrebni vsaj dve veljavni razporeditvi.</div>}
+    <div className="poolBar">{pool.length>0 && <><span className="mono">{pool.length} veljavnih</span>{pool.slice(0,8).map((c,i)=><button key={i} className={"thumb "+(idx===i?"on":"")} onClick={()=>setIdx(i)}><span className="mono">{(c.ev.score*100|0)}</span></button>)}</>}</div>
+  </main>;
+}
+
+function ABPlanCard({label,cand,cfg,zones,routing,pathMin,pathWant}){
+  return <div className="abPlanCard">
+    <div className="abHead"><b>{label}</b><span className="mono">score {(cand.ev.score*100|0)} · prehod {Math.round(cand.ev.aisle)} mm · halo {(cand.ev.halo/1e6).toFixed(2)} m²</span></div>
+    <div className="abSheet"><O2Plan cand={cand} cfg={cfg} zones={zones} routing={routing} paths={[]} bandMin={pathMin} bandWant={pathWant}/></div>
+  </div>;
+}
+
 function StagePanel({rp}){
   const {best,cfg,zones,routing,feasibility,hasDoor,soft,pool,idx,setIdx,paths,showPaths,pathMin,pathWant}=rp;
   const [view,setView]=usePersistentState("floorplanner.stageView","plan");
@@ -535,7 +596,7 @@ function StagePanel({rp}){
 }
 
 /* ===== Korak 3 (b) — preverba, instalacije, A/B aktivno učenje, kanali ===== */
-function ReviewPanel({rp}){
+function ReviewPanel({rp,showAB=true,showBench=true}){
   const {best,cfg,routing,optionA,optionB,abPair,explore,setExplore,pref,channels,setChannel,bestChannelScores,choosePreference,paths,comfort,pathMin,pathWant}=rp;
   return (
     <aside className="col">
@@ -571,7 +632,7 @@ function ReviewPanel({rp}){
           </div>}
           <div className="softNote"><b style={{color:"#e2553f"}}>Minimalna {pathMin} mm</b> = trdo (prehodnost, veljavnost). <b style={{color:"#5bbd8b"}}>Želena {pathWant} mm</b> = mehko (udobje, vpliva le na to oceno).</div>
         </Section>
-        <Section k="ab" title="A/B preference · aktivno učenje">
+        {showAB&&<Section k="ab" title="A/B preference · aktivno učenje">
           {optionA&&optionB ? <div className="abBox">
             <div className="abBtns">
               <button onClick={()=>choosePreference(optionA,optionB)}>A <span className="mono">{(optionA.ev.score*100|0)}</span></button>
@@ -590,26 +651,27 @@ function ReviewPanel({rp}){
             <div className="prefBars"><span>donos <b className="mono">{Math.round(measurePreferenceGain(pref)*100)}</b></span><span>stabilnost <b className="mono">{pref.stableStreak}</b></span></div>
             <div className={pref.converged?"conv on":"conv"}>{pref.converged?`konvergenca po ${pref.comparisons} primerjavah`:`${pref.comparisons} primerjav · signal ${pref.dominantSignal}`}</div>
           </div> : <div className="soft2 none">Za A/B sta potrebni vsaj dve veljavni rešitvi.</div>}
-        </Section>
-        <Section k="bench" title="Testna miza kanalov" defaultOpen={false}>
+        </Section>}
+        {showBench&&<Section k="bench" title="Testna miza kanalov" defaultOpen={false}>
+          <div className="softNote">Kanal je merilo, po katerem engine primerja razporeditve. A/B izbire premikajo <b>learned</b>; <b>prior</b> nastaviš ročno, <b>zaupanje</b> določa mešanico, <b>eff</b> je efektivna utež.</div>
           <div className="channelBench">
             {channels.map(ch=>{
               const score=bestChannelScores?.scores.find(s=>s.channelId===ch.id);
               return <div key={ch.id} className={"channelCard "+(!ch.enabled?"off":"")}>
                 <div className="chTop"><label><input type="checkbox" checked={ch.enabled} onChange={e=>setChannel(ch.id,{enabled:e.target.checked})}/> {ch.name}</label><span>{ch.family}</span></div>
                 <div className="chScope"><button className={ch.scope==="global"?"on":""} onClick={()=>setChannel(ch.id,{scope:"global"})}>global</button><button className={ch.scope==="room-type"?"on":""} onClick={()=>setChannel(ch.id,{scope:"room-type"})}>room</button></div>
-                <label className="chSlider">prior <input type="range" min="0" max="1" step="0.01" value={ch.prior} onChange={e=>setChannel(ch.id,{prior:+e.target.value})}/><b className="mono">{Math.round(ch.prior*100)}</b></label>
-                <label className="chSlider">zaup. <input type="range" min="0" max="1" step="0.01" value={ch.confidence} onChange={e=>setChannel(ch.id,{confidence:+e.target.value})}/><b className="mono">{Math.round(ch.confidence*100)}</b></label>
+                <label className="chSlider" title="Prior: ročna začetna utež, preden A/B izbire dodajo signal.">prior <input type="range" min="0" max="1" step="0.01" value={ch.prior} onChange={e=>setChannel(ch.id,{prior:+e.target.value})}/><b className="mono">{Math.round(ch.prior*100)}</b></label>
+                <label className="chSlider" title="Zaupanje: koliko naj eff sledi priorju proti learned signalu.">zaup. <input type="range" min="0" max="1" step="0.01" value={ch.confidence} onChange={e=>setChannel(ch.id,{confidence:+e.target.value})}/><b className="mono">{Math.round(ch.confidence*100)}</b></label>
                 <div className="chBars">
-                  <span style={{"--w":`${ch.prior*100}%`}}>prior</span>
-                  <span style={{"--w":`${ch.learned*100}%`}}>learned</span>
-                  <span style={{"--w":`${effectiveWeight(ch)*100}%`}}>eff</span>
+                  <span title="Prior: kar nastaviš ročno." style={{"--w":`${ch.prior*100}%`}}>prior</span>
+                  <span title="Learned: kar engine nauči iz A/B izbir." style={{"--w":`${ch.learned*100}%`}}>learned</span>
+                  <span title="Eff: efektivna utež, zmes priorja in learned." style={{"--w":`${effectiveWeight(ch)*100}%`}}>eff</span>
                 </div>
                 <div className="chScore">score <b className="mono">{score?Math.round(score.value*100):"-"}</b></div>
               </div>
             })}
           </div>
-        </Section>
+        </Section>}
       </> : <div className="noRes2">Ni veljavne rešitve za te zahteve.</div>}
     </aside>
   );
@@ -986,6 +1048,13 @@ const CSS=`
 .sheet{flex:1;margin:0 16px;background:#f6f7f3;border-radius:11px;border:1px solid var(--bd);overflow:hidden;min-height:360px;touch-action:none;display:flex;align-items:center;justify-content:center}
 .threeHost{width:100%;height:100%;min-height:360px;display:block;touch-action:none}
 .threeHost canvas{width:100%;height:100%;display:block}
+.abStage{gap:10px;padding-bottom:12px}.abProgress{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 16px;color:var(--mut);font-size:11px}
+.abProgress label{display:flex;align-items:center;gap:7px}.abProgress input{width:120px}.bestStrip{margin:0 16px;border:1px solid var(--bd);border-radius:8px;overflow:hidden;background:var(--panel)}
+.bestMini{height:210px;background:#f6f7f3}.bestMini svg{width:100%;height:100%}.abCompare{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 16px}
+.abPlanCard{min-width:0;background:var(--panel);border:1px solid var(--bd);border-radius:8px;overflow:hidden}.abHead{height:36px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 11px;font-size:12px;color:var(--tx);background:var(--panel);border-bottom:1px solid var(--bd)}
+.abHead .mono{font-size:10.5px;color:var(--mut);white-space:nowrap}.abSheet{height:360px;background:#f6f7f3}.abSheet svg{width:100%;height:100%}
+.abChoiceBtns{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;margin:0 16px}.abChoiceBtns button{height:38px;border:1px solid var(--bd);border-radius:8px;background:var(--p2);color:var(--tx);cursor:pointer}.abChoiceBtns button:hover{border-color:var(--cy)}
+@media(max-width:980px){.abCompare{grid-template-columns:1fr}.abSheet{height:300px}.abChoiceBtns{grid-template-columns:1fr}}
 .noRes,.noRes2{color:var(--mut);font-size:13px;padding:30px;text-align:center;line-height:1.6}.noRes2{padding:14px}
 .num{margin-bottom:12px}.fhd{display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:6px}.fhd .mono{color:var(--cy)}
 input[type=range]{width:100%;accent-color:var(--cy);height:4px}
