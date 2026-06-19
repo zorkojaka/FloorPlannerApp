@@ -371,21 +371,21 @@ function useRoomProject(library){
   // zato izklop kanala / premik priorja / drsnik zaupanja takoj spremenijo, kateri
   // je "best" in vrstni red sličic — kanali dejansko vplivajo, ne le rišejo.
   const ranked=useMemo(()=>rankByChannels(rankByPreference(pool,pref.weights),channels,scoreCfg),[pool,channels,pref.weights,scoreCfg]);
-  const best=ranked[idx];
+  const [championKey,setChampionKey]=useState(null);
+  const [championEvents,setChampionEvents]=useState([]);
+  const champion=useMemo(()=>ranked.find(c=>candidateKey(c)===championKey)||ranked[0], [ranked,championKey]);
+  const best=champion;
+  useEffect(()=>{if(ranked.length>0&&!championKey)setChampionKey(candidateKey(ranked[0]));},[ranked,championKey]);
   const [explore,setExplore]=usePersistentState("floorplanner.explore",0.7);
   const [dismissedPairs,setDismissedPairs]=useState([]);
+  const exploitPair=useMemo(()=>champion?championPair(champion,ranked,dismissedPairs):null,[champion,ranked,dismissedPairs]);
+  const explorePair=useMemo(()=>nextUndismissedInfoPair(ranked,channels,scoreCfg,dismissedPairs),[ranked,channels,scoreCfg,dismissedPairs]);
   const abPair=useMemo(()=>{
-    let candidates=ranked;
-    for(let attempt=0;attempt<Math.max(1,ranked.length-1);attempt++){
-      const pair=nextPair(candidates,channels,scoreCfg,explore);
-      if(!pair)return null;
-      const key=pairKey(pair.a,pair.b);
-      if(!dismissedPairs.includes(key))return pair;
-      candidates=candidates.filter(c=>candidateKey(c)!==candidateKey(pair.b));
-      if(candidates.length<2)break;
-    }
-    return nextPair(ranked,channels,scoreCfg,explore);
-  },[ranked,channels,scoreCfg,explore,dismissedPairs]);
+    if(explore>=0.95)return explorePair;
+    if(explore<=0.05)return exploitPair;
+    const useExplore=((pref.comparisons+1)%10)/10<explore;
+    return useExplore?explorePair||exploitPair:exploitPair||explorePair;
+  },[explore,explorePair,exploitPair,pref.comparisons]);
   const optionA=abPair?.a, optionB=abPair?.b;
   const bestChannelScores=best?scoreCandidateChannels(best,channels,scoreCfg):null;
   const routing=useMemo(()=>best?routeServices(best.placed,cfg,{allowFloorRoutes}):null,[best,cfg,allowFloorRoutes]);
@@ -408,8 +408,12 @@ function useRoomProject(library){
     const minW=Math.min(...reach.map(p=>p.minWidth));
     return {minWidth:minW, allOk:reach.length===paths.length, ratio:Math.max(0,Math.min(1,minW/Math.max(pathWant,1)))};
   },[paths,pathWant]);
-  const choosePreference=(selected,rejected)=>{
+  const choosePreference=(selected,rejected,mode="choice")=>{
+    const selectedKey=candidateKey(selected), championBefore=champion?candidateKey(champion):null;
+    const challengerWon=championBefore&&selectedKey!==championBefore;
     setDismissedPairs(P=>[...P,pairKey(selected,rejected)]);
+    if(challengerWon) setChampionKey(selectedKey);
+    setChampionEvents(E=>[...E.slice(-7),{changed:Boolean(challengerWon),mode}]);
     setPref(prev=>{
       const next=recordPreference(prev,selected,rejected);
       // učenje posodobi LEARNED (ne prior); živo rangiranje (ranked memo) takoj prevzame
@@ -418,12 +422,19 @@ function useRoomProject(library){
       return next;
     });
   };
-  const chooseEqualPreference=(a,b)=>setDismissedPairs(P=>[...P,pairKey(a,b)]);
+  const chooseChampionStays=(challenger)=>{
+    if(!champion||!challenger)return;
+    choosePreference(champion,challenger,"champion-stays");
+  };
+  const chooseEqualPreference=(a,b)=>{
+    setDismissedPairs(P=>[...P,pairKey(a,b)]);
+    setChampionEvents(E=>[...E.slice(-7),{changed:false,mode:"equal"}]);
+  };
   const setChannel=(id,patch)=>setChannels(C=>C.map(c=>c.id===id?{...c,...patch}:c));
   const setInst=(id,patch)=>setProg(P=>P.map(p=>p.id===id?{...p,...patch}:p));
   return {W,setW,D,setD,wet,setWet,prog,setProg,setInst,soft,setSoft,allowFloorRoutes,setAllowFloorRoutes,zones,setZones,setZone,
-    pool:ranked,idx,setIdx,seed,setSeed,pref,channels,setChannel,cfg,feasibility,cornerEls,hasDoor,best,explore,setExplore,
-    abPair,optionA,optionB,bestChannelScores,routing,choosePreference,chooseEqualPreference,
+    pool:ranked,idx,setIdx,seed,setSeed,pref,channels,setChannel,cfg,feasibility,cornerEls,hasDoor,best,championKey,championEvents,explore,setExplore,
+    abPair,optionA,optionB,bestChannelScores,routing,choosePreference,chooseEqualPreference,chooseChampionStays,
     pathMin,setPathMin,pathWant,setPathWant,showPaths,setShowPaths,paths,comfort};
 }
 
@@ -433,6 +444,23 @@ function candidateKey(candidate){
 
 function pairKey(a,b){
   return [candidateKey(a),candidateKey(b)].sort().join("::");
+}
+
+function championPair(champion,pool,dismissedPairs){
+  const challenger=pool.find(c=>candidateKey(c)!==candidateKey(champion)&&!dismissedPairs.includes(pairKey(champion,c)));
+  return challenger?{a:champion,b:challenger,info:0,quality:(champion.ev.score+challenger.ev.score)/2,mode:"prvak vs izzivalka"}:null;
+}
+
+function nextUndismissedInfoPair(pool,channels,cfg,dismissedPairs){
+  let candidates=pool;
+  for(let attempt=0;attempt<Math.max(1,pool.length-1);attempt++){
+    const pair=nextPair(candidates,channels,cfg,1);
+    if(!pair)return null;
+    if(!dismissedPairs.includes(pairKey(pair.a,pair.b)))return {...pair,mode:"raziskovanje"};
+    candidates=candidates.filter(c=>candidateKey(c)!==candidateKey(pair.b));
+    if(candidates.length<2)break;
+  }
+  return nextPair(pool,channels,cfg,1);
 }
 
 // O2 v pogledu orehov (testna miza): vse troje hkrati, kot prej.
@@ -528,38 +556,46 @@ function ConstraintsPanel({rp,library}){
 
 /* ===== Korak 3 (a) — oder z razporeditvijo in poolom ===== */
 function ABStagePanel({rp}){
-  const {best,cfg,zones,optionA,optionB,abPair,choosePreference,chooseEqualPreference,pref,explore,setExplore,pathMin,pathWant,pool,idx,setIdx,allowFloorRoutes}=rp;
+  const {best,cfg,zones,optionA,optionB,abPair,choosePreference,chooseEqualPreference,chooseChampionStays,pref,championKey,championEvents,explore,setExplore,pathMin,pathWant,pool,idx,setIdx,allowFloorRoutes}=rp;
   const routeOf=(cand)=>cand?routeServices(cand.placed,cfg,{allowFloorRoutes}):null;
+  const aIsChampion=optionA&&candidateKey(optionA)===championKey;
+  const bIsChampion=optionB&&candidateKey(optionB)===championKey;
+  const championInPair=aIsChampion||bIsChampion;
+  const challenger=aIsChampion?optionB:bIsChampion?optionA:null;
+  const recent=championEvents.slice(-5);
+  const changes=recent.filter(e=>e.changed).length;
+  const lastNew=championEvents.at(-1)?.changed;
   return <main className="cstage abStage">
     <div className="abProgress">
       <span>Primerjave <b className="mono">{pref.comparisons}</b></span>
-      <span className={pref.converged?"conv on":"conv"}>{pref.converged?`konvergenca · ${pref.stableStreak}`:`stabilnost ${pref.stableStreak}`}</span>
-      <span>donos para <b className="mono">{abPair?Math.round(abPair.info*100):0}</b></span>
+      <span className={changes===0&&recent.length>=3?"conv on":"conv"}>{recent.length<3?"še zbiramo":changes===0?"prvak drži":`prvak se menja ${changes}/${recent.length}`}</span>
+      <span>{abPair?.mode||"par"} · donos <b className="mono">{abPair?Math.round(abPair.info*100):0}</b></span>
       <label>raziskovanje <b className="mono">{Math.round(explore*100)}</b><input type="range" min="0" max="1" step="0.05" value={explore} onChange={e=>setExplore(+e.target.value)}/></label>
       <button className="microBtn" onClick={()=>setExplore(suggestedExplore(pref.comparisons))}>predlagaj</button>
     </div>
     <div className="bestStrip">
-      <div className="abHead"><b>Trenutno najboljša</b><span className="mono">{best?(best.ev.score*100|0):"-"}</span></div>
+      <div className="abHead"><b>Trenutno najboljša {lastNew&&<em className="newChamp">nov prvak</em>}</b><span className="mono">{best?(best.ev.score*100|0):"-"}</span></div>
       <div className="bestMini">{best?<O2Plan cand={best} cfg={cfg} zones={zones} routing={routeOf(best)} paths={[]} bandMin={pathMin} bandWant={pathWant}/>:<div className="noRes">Ni veljavne rešitve.</div>}</div>
     </div>
     {optionA&&optionB ? <>
       <div className="abCompare">
-        <ABPlanCard label="A" cand={optionA} cfg={cfg} zones={zones} routing={routeOf(optionA)} pathMin={pathMin} pathWant={pathWant}/>
-        <ABPlanCard label="B" cand={optionB} cfg={cfg} zones={zones} routing={routeOf(optionB)} pathMin={pathMin} pathWant={pathWant}/>
+        <ABPlanCard label="A" badge={aIsChampion?"prvak":bIsChampion?"izzivalka":""} cand={optionA} cfg={cfg} zones={zones} routing={routeOf(optionA)} pathMin={pathMin} pathWant={pathWant}/>
+        <ABPlanCard label="B" badge={bIsChampion?"prvak":aIsChampion?"izzivalka":""} cand={optionB} cfg={cfg} zones={zones} routing={routeOf(optionB)} pathMin={pathMin} pathWant={pathWant}/>
       </div>
       <div className="abChoiceBtns">
         <button onClick={()=>choosePreference(optionA,optionB)}>A je boljša</button>
         <button onClick={()=>chooseEqualPreference(optionA,optionB)}>enakovredni</button>
         <button onClick={()=>choosePreference(optionB,optionA)}>B je boljša</button>
+        {championInPair&&<button className="champStay" onClick={()=>chooseChampionStays(challenger)}>trenutno najboljša ostane</button>}
       </div>
     </> : <div className="noRes">Za A/B sta potrebni vsaj dve veljavni razporeditvi.</div>}
     <div className="poolBar">{pool.length>0 && <><span className="mono">{pool.length} veljavnih</span>{pool.slice(0,8).map((c,i)=><button key={i} className={"thumb "+(idx===i?"on":"")} onClick={()=>setIdx(i)}><span className="mono">{(c.ev.score*100|0)}</span></button>)}</>}</div>
   </main>;
 }
 
-function ABPlanCard({label,cand,cfg,zones,routing,pathMin,pathWant}){
+function ABPlanCard({label,badge,cand,cfg,zones,routing,pathMin,pathWant}){
   return <div className="abPlanCard">
-    <div className="abHead"><b>{label}</b><span className="mono">score {(cand.ev.score*100|0)} · prehod {Math.round(cand.ev.aisle)} mm · halo {(cand.ev.halo/1e6).toFixed(2)} m²</span></div>
+    <div className="abHead"><b>{label} {badge&&<em className={badge==="prvak"?"champBadge":"challBadge"}>{badge}</em>}</b><span className="mono">score {(cand.ev.score*100|0)} · prehod {Math.round(cand.ev.aisle)} mm · halo {(cand.ev.halo/1e6).toFixed(2)} m²</span></div>
     <div className="abSheet"><O2Plan cand={cand} cfg={cfg} zones={zones} routing={routing} paths={[]} bandMin={pathMin} bandWant={pathWant}/></div>
   </div>;
 }
@@ -1053,7 +1089,9 @@ const CSS=`
 .bestMini{height:210px;background:#f6f7f3}.bestMini svg{width:100%;height:100%}.abCompare{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 16px}
 .abPlanCard{min-width:0;background:var(--panel);border:1px solid var(--bd);border-radius:8px;overflow:hidden}.abHead{height:36px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 11px;font-size:12px;color:var(--tx);background:var(--panel);border-bottom:1px solid var(--bd)}
 .abHead .mono{font-size:10.5px;color:var(--mut);white-space:nowrap}.abSheet{height:360px;background:#f6f7f3}.abSheet svg{width:100%;height:100%}
-.abChoiceBtns{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;margin:0 16px}.abChoiceBtns button{height:38px;border:1px solid var(--bd);border-radius:8px;background:var(--p2);color:var(--tx);cursor:pointer}.abChoiceBtns button:hover{border-color:var(--cy)}
+.newChamp,.champBadge,.challBadge{font-style:normal;font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;border-radius:5px;padding:3px 6px;margin-left:6px}
+.newChamp,.champBadge{background:#10302a;color:#5bbd8b;border:1px solid #285d4b}.challBadge{background:#2a1a10;color:#d9a23b;border:1px solid #5a4420}
+.abChoiceBtns{display:grid;grid-template-columns:1fr auto 1fr auto;gap:8px;margin:0 16px}.abChoiceBtns button{height:38px;border:1px solid var(--bd);border-radius:8px;background:var(--p2);color:var(--tx);cursor:pointer;padding:0 12px}.abChoiceBtns button:hover{border-color:var(--cy)}.abChoiceBtns .champStay{border-color:#285d4b;color:#5bbd8b;background:#10241f}
 @media(max-width:980px){.abCompare{grid-template-columns:1fr}.abSheet{height:300px}.abChoiceBtns{grid-template-columns:1fr}}
 .noRes,.noRes2{color:var(--mut);font-size:13px;padding:30px;text-align:center;line-height:1.6}.noRes2{padding:14px}
 .num{margin-bottom:12px}.fhd{display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:6px}.fhd .mono{color:var(--cy)}
