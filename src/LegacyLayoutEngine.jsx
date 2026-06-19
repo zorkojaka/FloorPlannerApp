@@ -1,4 +1,6 @@
 ﻿import React, { useState, useRef, useMemo, useEffect } from "react";
+import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { baseLib } from "./elements/library";
 import { CONNECTION_META as CONN, SIDE_LABELS as SIDES, isDoor, orientation, serviceSides } from "./elements/model";
 import { connectionPoint as connXY, nearestEdge, wallEdge, doorSwing } from "./engine/geometry";
@@ -9,7 +11,7 @@ import { initialPreferenceState, rankByPreference, recordPreference } from "./en
 import { nextPair, suggestedExplore } from "./engine/active";
 import { buildFreeGrid, findPath } from "./engine/freespace";
 import { buildElevation } from "./engine/elevation";
-import { elementBox } from "./engine/volume";
+import { elementBox, humanUsageBox } from "./engine/volume";
 import { doorInteriorPoint, usagePoint } from "./engine/evaluator";
 import { measureGeneralization, measureInductionHoldout, measurePreferenceGain } from "./engine/metrics";
 import { defaultChannels, effectiveWeight, learnChannelsFromPreference, rankByChannels, scoreCandidateChannels } from "./engine/channels";
@@ -451,21 +453,26 @@ function ConstraintsPanel({rp,library}){
 function StagePanel({rp}){
   const {best,cfg,zones,routing,feasibility,hasDoor,soft,pool,idx,setIdx,paths,showPaths,pathMin,pathWant}=rp;
   const [view,setView]=usePersistentState("floorplanner.stageView","plan");
-  const wallView=view==="plan"?null:view;
+  const [show3DHumans,setShow3DHumans]=usePersistentState("floorplanner.show3DHumans",false);
+  const wallView=["N","E","S","W"].includes(view)?view:null;
   const viewButtons=[
     ["plan","Tloris"],
     ["N","Naris S"],
     ["E","Naris V"],
     ["S","Naris J"],
     ["W","Naris Z"],
+    ["3d","3D"],
   ];
   return (
     <main className="cstage">
       <div className="legend mono"><span><i style={{background:"#2b3138"}}/>oprema</span><span><i style={{background:"#e2553f"}}/>jedro</span><span><i style={{background:"#d9a23b",opacity:.5}}/>halo</span><span><i style={{background:"#c0392b"}}/>prekrivanje</span><span><i style={{background:"#5aa9e6",opacity:.35}}/>človek</span><span><i style={{background:"#86c9ff",opacity:.5}}/>okno</span><span><i style={{background:"#8a96a3"}}/>stena</span><span><i style={{background:"#16b3b3"}}/>mokri zid</span><span><i style={{background:"#5bbd8b"}}/>pot</span></div>
       <div className="viewTabs" role="tablist" aria-label="Pogled risbe">
         {viewButtons.map(([id,label])=><button key={id} className={view===id?"on":""} onClick={()=>setView(id)}>{label}</button>)}
+        {view==="3d"&&<label className="sceneTgl"><input type="checkbox" checked={show3DHumans} onChange={e=>setShow3DHumans(e.target.checked)}/> človek</label>}
       </div>
-      <div className="sheet">{best? (wallView
+      <div className="sheet">{best? (view==="3d"
+        ? <ThreeRoomView cand={best} cfg={cfg} showHumans={show3DHumans}/>
+        : wallView
         ? <ElevationView cand={best} cfg={cfg} wall={wallView}/>
         : <O2Plan cand={best} cfg={cfg} zones={zones} routing={routing} paths={showPaths?paths:[]} bandMin={pathMin} bandWant={pathWant}/>)
         : <div className="noRes">{!feasibility.feasible?<>Brief ni izvedljiv:<br/>{feasibility.reasons.join(" · ")}</>:!hasDoor?"Dodaj vrata - soba brez vrat nima veljavne rešitve.":soft?"Ni veljavne razporeditve ob teh omejitvah. Povečaj prostor ali zrahljaj zahteve.":"V strogem načinu ni rešitve - vklopi mehka pravila."}</div>}</div>
@@ -614,6 +621,205 @@ function O2Plan({cand,cfg,zones,routing,paths=[],bandMin=600,bandWant=900}){ con
   </svg>;
 }
 
+function ThreeRoomView({cand,cfg,showHumans}){
+  const hostRef=useRef(null);
+  useEffect(()=>{
+    const host=hostRef.current;
+    if(!host)return;
+    const {W,D,wetWall}=cfg;
+    const H=2600,wallT=80;
+    const scene=new THREE.Scene();
+    scene.background=new THREE.Color("#f6f7f3");
+    const camera=new THREE.PerspectiveCamera(45,1,20,20000);
+    const renderer=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
+    renderer.shadowMap.enabled=true;
+    host.appendChild(renderer.domElement);
+    const controls=new OrbitControls(camera,renderer.domElement);
+    controls.enableDamping=true;
+    controls.target.set(0,700,0);
+    controls.minDistance=Math.max(W,D)*0.45;
+    controls.maxDistance=Math.max(W,D)*4;
+
+    scene.add(new THREE.HemisphereLight(0xffffff,0x9aa1a8,1.9));
+    const sun=new THREE.DirectionalLight(0xffffff,1.8);
+    sun.position.set(-W*0.65,3200,D*0.9);
+    sun.castShadow=true;
+    scene.add(sun);
+
+    const mats={
+      floor:new THREE.MeshStandardMaterial({color:"#dfe6df",roughness:.82}),
+      wall:new THREE.MeshStandardMaterial({color:"#d8ded7",roughness:.9}),
+      wet:new THREE.MeshStandardMaterial({color:"#16b3b3",roughness:.82,transparent:true,opacity:.46}),
+      fixture:new THREE.MeshStandardMaterial({color:"#dfe6df",roughness:.66}),
+      fixtureTop:new THREE.MeshStandardMaterial({color:"#cfd8cf",roughness:.62}),
+      glass:new THREE.MeshStandardMaterial({color:"#86c9ff",transparent:true,opacity:.34,roughness:.25,metalness:.04}),
+      doorArc:new THREE.LineBasicMaterial({color:"#3a78b0",transparent:true,opacity:.85}),
+      human:new THREE.MeshStandardMaterial({color:"#5aa9e6",transparent:true,opacity:.22,roughness:.55,depthWrite:false}),
+    };
+    const group=new THREE.Group();
+    scene.add(group);
+
+    const addBox=(box,mat,cast=false)=>{
+      if(box.w<=0||box.h<=0||box.h3<=0)return null;
+      const mesh=new THREE.Mesh(new THREE.BoxGeometry(box.w,box.h3,box.h),mat);
+      mesh.position.set(box.x+box.w/2-W/2,box.z+box.h3/2,box.y+box.h/2-D/2);
+      mesh.castShadow=cast;
+      mesh.receiveShadow=true;
+      group.add(mesh);
+      return mesh;
+    };
+
+    addBox({x:0,y:0,z:-26,w:W,h:D,h3:26},mats.floor);
+    for(const wall of ["N","E","S","W"])addWall(group,wall,cfg,cand.placed,H,wallT,wall===wetWall?mats.wet:mats.wall);
+
+    cand.placed.filter(p=>p.kind!=="door"&&p.el.kind!=="window").forEach((p)=>{
+      const mesh=addBox(elementBox(p),mats.fixture,true);
+      if(mesh)mesh.name=p.name;
+    });
+
+    cand.placed.filter(p=>p.el.kind==="window").forEach((p)=>addWindowPane(group,p,cfg,H,mats.glass));
+    cand.placed.filter(p=>p.kind==="door").forEach((p)=>addDoorSwing3D(group,p,cfg,mats.doorArc));
+    if(showHumans){
+      cand.placed.filter(p=>p.kind!=="door").forEach((p)=>{
+        const human=humanUsageBox(p);
+        if(human)addBox(human,mats.human,false);
+      });
+    }
+
+    const axes=new THREE.GridHelper(Math.max(W,D),Math.ceil(Math.max(W,D)/250),0xb9c0c7,0xd0d6dc);
+    axes.position.y=1;
+    group.add(axes);
+
+    camera.position.set(W*.82,Math.max(W,D)*.78,D*1.18);
+    camera.lookAt(controls.target);
+    controls.update();
+
+    const resize=()=>{
+      const rect=host.getBoundingClientRect();
+      const width=Math.max(320,rect.width),height=Math.max(260,rect.height);
+      renderer.setSize(width,height,false);
+      camera.aspect=width/height;
+      camera.updateProjectionMatrix();
+    };
+    const observer=new ResizeObserver(resize);
+    observer.observe(host);
+    resize();
+
+    let raf=0,sampled=false;
+    const loop=()=>{
+      controls.update();
+      renderer.render(scene,camera);
+      if(!sampled){
+        sampled=true;
+        const gl=renderer.getContext(),pixels=new Uint8Array(4);
+        const xs=[.25,.5,.75].map(v=>Math.floor(gl.drawingBufferWidth*v));
+        const ys=[.25,.5,.75].map(v=>Math.floor(gl.drawingBufferHeight*v));
+        let samples=0,nonBlank=0;
+        for(const x of xs)for(const y of ys){
+          gl.readPixels(x,y,1,1,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+          samples++;
+          if(!(pixels[0]>245&&pixels[1]>245&&pixels[2]>240))nonBlank++;
+        }
+        renderer.domElement.dataset.pixelSamples=String(samples);
+        renderer.domElement.dataset.nonBlankSamples=String(nonBlank);
+      }
+      raf=requestAnimationFrame(loop);
+    };
+    loop();
+
+    return ()=>{
+      cancelAnimationFrame(raf);
+      observer.disconnect();
+      controls.dispose();
+      renderer.dispose();
+      host.removeChild(renderer.domElement);
+      scene.traverse((obj)=>{
+        if(obj.geometry)obj.geometry.dispose?.();
+        if(obj.material){
+          const materials=Array.isArray(obj.material)?obj.material:[obj.material];
+          materials.forEach((mat)=>mat.dispose?.());
+        }
+      });
+    };
+  },[cand,cfg,showHumans]);
+  return <div className="threeHost" ref={hostRef} aria-label="3D pogled prostora"/>;
+}
+
+function addWall(group,wall,cfg,placed,H,wallT,mat){
+  const openings=placed.filter(p=>p.wall===wall&&(p.kind==="door"||p.el.kind==="window")).map((p)=>{
+    const along=wall==="N"||wall==="S"?p.foot.x:p.foot.y;
+    const width=wall==="N"||wall==="S"?p.foot.w:p.foot.h;
+    const z=p.kind==="door"?0:(p.el.z??p.el.parapet??900);
+    const h=p.kind==="door"?(p.el.h||2100):p.el.h;
+    return {start:along,end:along+width,z,endZ:z+h};
+  });
+  const L=wall==="N"||wall==="S"?cfg.W:cfg.D;
+  const xs=[0,L],zs=[0,H];
+  openings.forEach((o)=>{xs.push(clamp(o.start,0,L),clamp(o.end,0,L));zs.push(clamp(o.z,0,H),clamp(o.endZ,0,H));});
+  const sortedX=[...new Set(xs)].sort((a,b)=>a-b);
+  const sortedZ=[...new Set(zs)].sort((a,b)=>a-b);
+  for(let i=0;i<sortedX.length-1;i++){
+    for(let j=0;j<sortedZ.length-1;j++){
+      const a=sortedX[i],b=sortedX[i+1],z0=sortedZ[j],z1=sortedZ[j+1];
+      if(b-a<1||z1-z0<1)continue;
+      const cx=(a+b)/2,cz=(z0+z1)/2;
+      if(openings.some(o=>cx>o.start&&cx<o.end&&cz>o.z&&cz<o.endZ))continue;
+      addWallSegment(group,wall,cfg,a,b-a,z0,z1-z0,wallT,mat);
+    }
+  }
+}
+
+function addWallSegment(group,wall,cfg,along,len,z,h,wallT,mat){
+  const W=cfg.W,D=cfg.D;
+  const box=wall==="N"?{x:along,y:-wallT,z,w:len,h:wallT,h3:h}
+    :wall==="S"?{x:along,y:D,z,w:len,h:wallT,h3:h}
+    :wall==="W"?{x:-wallT,y:along,z,w:wallT,h:len,h3:h}
+    :{x:W,y:along,z,w:wallT,h:len,h3:h};
+  const mesh=new THREE.Mesh(new THREE.BoxGeometry(box.w,box.h3,box.h),mat);
+  mesh.position.set(box.x+box.w/2-W/2,box.z+box.h3/2,box.y+box.h/2-D/2);
+  mesh.receiveShadow=true;
+  group.add(mesh);
+}
+
+function addWindowPane(group,p,cfg,H,mat){
+  const W=cfg.W,D=cfg.D,t=18;
+  const z=p.el.z??p.el.parapet??900;
+  const h=p.el.h;
+  const box=p.wall==="N"?{x:p.foot.x,y:-t,z,w:p.foot.w,h:t,h3:h}
+    :p.wall==="S"?{x:p.foot.x,y:D,z,w:p.foot.w,h:t,h3:h}
+    :p.wall==="W"?{x:-t,y:p.foot.y,z,w:t,h:p.foot.h,h3:h}
+    :{x:W,y:p.foot.y,z,w:t,h:p.foot.h,h3:h};
+  const pane=new THREE.Mesh(new THREE.BoxGeometry(box.w,box.h3,box.h),mat);
+  pane.position.set(box.x+box.w/2-W/2,box.z+box.h3/2,box.y+box.h/2-D/2);
+  group.add(pane);
+  addWallSegment(group,p.wall,cfg,p.wall==="N"||p.wall==="S"?p.foot.x:p.foot.y,p.wall==="N"||p.wall==="S"?p.foot.w:p.foot.h,z-32,32,24,mat);
+  addWallSegment(group,p.wall,cfg,p.wall==="N"||p.wall==="S"?p.foot.x:p.foot.y,p.wall==="N"||p.wall==="S"?p.foot.w:p.foot.h,Math.min(H,z+h),32,24,mat);
+}
+
+function addDoorSwing3D(group,p,cfg,mat){
+  const g=doorSwing(p.wall,p.hinge?1:0,p.dir,p.foot,cfg.W,cfg.D);
+  const start=Math.atan2(g.ty-g.hy,g.tx-g.hx);
+  let end=Math.atan2(g.jy-g.hy,g.jx-g.hx);
+  let delta=end-start;
+  if(g.sweep&&delta<0)delta+=Math.PI*2;
+  if(!g.sweep&&delta>0)delta-=Math.PI*2;
+  const pts=[];
+  for(let i=0;i<=24;i++){
+    const a=start+delta*(i/24);
+    const x=g.hx+Math.cos(a)*g.lw;
+    const y=g.hy+Math.sin(a)*g.lw;
+    pts.push(new THREE.Vector3(x-cfg.W/2,8,y-cfg.D/2));
+  }
+  const arc=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),mat);
+  group.add(arc);
+  const leaf=new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(g.hx-cfg.W/2,10,g.hy-cfg.D/2),
+    new THREE.Vector3(g.tx-cfg.W/2,10,g.ty-cfg.D/2),
+  ]),mat);
+  group.add(leaf);
+}
+
 const WALL_LABELS={N:"S",E:"V",S:"J",W:"Z"};
 function ElevationView({cand,cfg,wall}){
   const model=buildElevation(cand.placed,cfg,wall);
@@ -714,7 +920,11 @@ const CSS=`
 .viewTabs{display:flex;gap:7px;padding:0 16px 12px;flex-wrap:wrap}
 .viewTabs button{height:30px;padding:0 11px;border-radius:7px;border:1px solid var(--bd);background:var(--panel);color:var(--mut);font-size:11px;cursor:pointer}
 .viewTabs button.on{border-color:var(--cy);background:#0e2626;color:var(--cy)}
+.sceneTgl{height:30px;display:flex;align-items:center;gap:6px;padding:0 10px;border:1px solid var(--bd);border-radius:7px;color:var(--mut);font-size:11px;background:var(--panel)}
+.sceneTgl input{accent-color:var(--cy)}
 .sheet{flex:1;margin:0 16px;background:#f6f7f3;border-radius:11px;border:1px solid var(--bd);overflow:hidden;min-height:360px;touch-action:none;display:flex;align-items:center;justify-content:center}
+.threeHost{width:100%;height:100%;min-height:360px;display:block;touch-action:none}
+.threeHost canvas{width:100%;height:100%;display:block}
 .noRes,.noRes2{color:var(--mut);font-size:13px;padding:30px;text-align:center;line-height:1.6}.noRes2{padding:14px}
 .num{margin-bottom:12px}.fhd{display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:6px}.fhd .mono{color:var(--cy)}
 input[type=range]{width:100%;accent-color:var(--cy);height:4px}
