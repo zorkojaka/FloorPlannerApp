@@ -4,7 +4,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { baseLib } from "./elements/library";
 import { CONNECTION_META as CONN, SIDE_LABELS as SIDES, MEDIA_PROFILE, connectionZ, isDoor, orientation, serviceSides } from "./elements/model";
 import { connectionPoint as connXY, nearestEdge, wallEdge, doorSwing } from "./engine/geometry";
-import { generateLayoutPool } from "./engine/generator";
+import { generateLayoutPool, searchLayouts } from "./engine/generator";
 import { routeServices, placedConnectionPoint, projectToWetWall } from "./engine/routing";
 import { checkFeasibility } from "./engine/feasibility";
 import { initialPreferenceState, rankByPreference, recordPreference } from "./engine/preference";
@@ -360,12 +360,17 @@ function useRoomProject(library){
   // Generiranje uporablja `cfg` brez pathWant → mehka želena NE regenerira bazena.
   const scoreCfg=useMemo(()=>({...cfg,pathWant}),[cfg,pathWant]);
   const feasibility=useMemo(()=>checkFeasibility(library,prog,cfg,zones),[library,prog,cfg,zones]);
+  // izid iskanja: loči DOKAZANO nemožnost (infeasible) od NISEM NAŠEL (not-found)
+  const [search,setSearch]=useState({status:'found',reasons:[],attempts:0,expanded:false});
+  const [extraSamples,setExtraSamples]=useState(0); // ročna razširitev iskanja
 
   useEffect(()=>{
-    if(!feasibility.feasible){setPool([]);setIdx(0);return;}
-    setPool(generateLayoutPool({library, program:prog, cfg, soft, zones, minPathWidth:pathMin}));
+    const res=searchLayouts({library, program:prog, cfg, soft, zones, minPathWidth:pathMin, samples:extraSamples>0?extraSamples:undefined});
+    setPool(res.candidates);
+    setSearch({status:res.status,reasons:res.reasons,attempts:res.attempts,expanded:res.expanded});
     setIdx(0);
-  },[library,prog,W,D,wet,soft,zones,seed,cfg,feasibility,pathMin]);
+  },[library,prog,W,D,wet,soft,zones,seed,cfg,feasibility,pathMin,extraSamples]);
+  const expandSearch=()=>setExtraSamples(s=>(s>0?s:700)*3); // razširi iskanje (več poskusov)
 
   const cornerEls=prog.filter(p=>{const e=library[p.key];return e&&!isDoor(e)&&serviceSides(e).length>1;});
   const hasDoor=prog.some(p=>isDoor(library[p.key]));
@@ -439,7 +444,7 @@ function useRoomProject(library){
   return {W,setW,D,setD,wet,setWet,prog,setProg,setInst,soft,setSoft,allowFloorRoutes,setAllowFloorRoutes,zones,setZones,setZone,
     pool:ranked,idx,setIdx,seed,setSeed,pref,channels,setChannel,cfg,feasibility,cornerEls,hasDoor,best,championKey,championEvents,explore,setExplore,
     abPair,optionA,optionB,bestChannelScores,routing,choosePreference,chooseEqualPreference,chooseChampionStays,
-    pathMin,setPathMin,pathWant,setPathWant,showPaths,setShowPaths,paths,comfort};
+    pathMin,setPathMin,pathWant,setPathWant,showPaths,setShowPaths,paths,comfort,search,expandSearch};
 }
 
 function candidateKey(candidate){
@@ -644,7 +649,7 @@ function Daljinec({layers,toggle,toggleGroup}){
 }
 
 function StagePanel({rp}){
-  const {best,cfg,zones,routing,feasibility,hasDoor,soft,pool,idx,setIdx,paths,showPaths,pathMin,pathWant}=rp;
+  const {best,cfg,zones,routing,feasibility,hasDoor,soft,pool,idx,setIdx,paths,showPaths,pathMin,pathWant,search,expandSearch}=rp;
   const [view,setView]=usePersistentState("floorplanner.stageView","plan");
   const [rawLayers,setRawLayers]=usePersistentState("floorplanner.layers",DEFAULT_LAYERS);
   const layers=useMemo(()=>({...DEFAULT_LAYERS,...rawLayers}),[rawLayers]);
@@ -671,7 +676,11 @@ function StagePanel({rp}){
           : wallView
           ? <ElevationView cand={best} cfg={cfg} wall={wallView} routing={routing} layers={layers}/>
           : <O2Plan cand={best} cfg={cfg} zones={zones} routing={routing} paths={paths} bandMin={pathMin} bandWant={pathWant} layers={layers}/>)
-          : <div className="noRes">{!feasibility.feasible?<>Brief ni izvedljiv:<br/>{feasibility.reasons.join(" · ")}</>:!hasDoor?"Dodaj vrata - soba brez vrat nima veljavne rešitve.":soft?"Ni veljavne razporeditve ob teh omejitvah. Povečaj prostor ali zrahljaj zahteve.":"V strogem načinu ni rešitve - vklopi mehka pravila."}</div>}</div>
+          : <div className="noRes">{search?.status==="infeasible"
+              ? <><b style={{color:"#f08a78"}}>NI VELJAVNE REŠITVE</b> (dokazano):<br/>{(search.reasons&&search.reasons.length?search.reasons:feasibility.reasons).join(" · ")}</>
+              : !hasDoor
+              ? "Dodaj vrata - soba brez vrat nima veljavne rešitve."
+              : <><b style={{color:"#d9a23b"}}>Nisem našel</b> v {search?.attempts||0} poskusih (morda obstaja).<br/><i style={{fontSize:"11px",color:"#8a96a3"}}>To NI dokaz nemožnosti — iskanje je naključno (znana omejitev iz HANDOFF).{soft?"":" Lahko tudi vklopiš mehka pravila."}</i><br/><button className="regen" style={{marginTop:10,maxWidth:240}} onClick={expandSearch}>↻ Razširi iskanje (več poskusov)</button></>}</div>}</div>
         <Daljinec layers={layers} toggle={toggle} toggleGroup={toggleGroup}/>
       </div>
       <div className="poolBar">{pool.length>0 && <><span className="mono">{pool.length} veljavnih</span>{pool.slice(0,8).map((c,i)=><button key={i} className={"thumb "+(idx===i?"on":"")} onClick={()=>setIdx(i)}><span className="mono">{(c.ev.score*100|0)}</span></button>)}</>}</div>
