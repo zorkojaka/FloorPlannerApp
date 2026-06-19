@@ -649,8 +649,8 @@ function ThreeRoomView({cand,cfg,showHumans}){
 
     const mats={
       floor:new THREE.MeshStandardMaterial({color:"#dfe6df",roughness:.82}),
-      wall:new THREE.MeshStandardMaterial({color:"#d8ded7",roughness:.9}),
-      wet:new THREE.MeshStandardMaterial({color:"#16b3b3",roughness:.82,transparent:true,opacity:.46}),
+      wall:new THREE.MeshStandardMaterial({color:"#d8ded7",roughness:.9,transparent:true,opacity:.38,depthWrite:false}),
+      wet:new THREE.MeshStandardMaterial({color:"#16b3b3",roughness:.82,transparent:true,opacity:.46,depthWrite:false}),
       fixture:new THREE.MeshStandardMaterial({color:"#dfe6df",roughness:.66}),
       fixtureTop:new THREE.MeshStandardMaterial({color:"#cfd8cf",roughness:.62}),
       glass:new THREE.MeshStandardMaterial({color:"#86c9ff",transparent:true,opacity:.34,roughness:.25,metalness:.04}),
