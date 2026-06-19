@@ -75,7 +75,7 @@ function Workflow({library,setLibrary}){
     {phase==="korak1" && <div className="phaseBody"><O1 library={library} setLibrary={setLibrary}/></div>}
     {phase==="korak2" && <div className="phaseBody">
       <div className="phaseLead">Korak 2 — omejitve sobe: »tako je«. Velikost, vrata, prepovedane cone, fiksni elementi. Ta nabor je vmesnik, ki ga kasneje napolni engine za razporeditev sob.</div>
-      <div className="grid2c">
+      <div className="grid2c setupGrid">
         <ConstraintsPanel rp={rp} library={library}/>
         <StagePanel rp={rp} library={library}/>
       </div>
@@ -1193,8 +1193,10 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .phaseBody{background:var(--panel);border:1px solid var(--bd);border-radius:12px;overflow:hidden}
 .phaseLead{padding:14px 18px;font-size:12px;line-height:1.55;color:#9fb0bd;border-bottom:1px solid var(--bd);background:var(--p2)}
 .grid2c{display:grid;grid-template-columns:240px 1fr;gap:1px;background:var(--bd)}
+.grid2c.setupGrid{grid-template-columns:minmax(660px,1.05fr) minmax(420px,.95fr)}
 .grid2c.wide{grid-template-columns:1fr 290px}
 @media(max-width:1080px){.grid2c,.grid2c.wide{grid-template-columns:1fr}}
+@media(max-width:1180px){.grid2c.setupGrid{grid-template-columns:1fr}}
 .phaseCta{display:flex;justify-content:flex-end;padding:14px 18px;background:var(--panel)}
 .ctaNext{background:#0e2626;border:1px solid #1f4444;color:var(--cy);border-radius:8px;padding:9px 18px;font-size:12.5px;cursor:pointer}.ctaNext:hover{border-color:var(--cy)}
 /* zložljive sekcije desnega stolpca */
