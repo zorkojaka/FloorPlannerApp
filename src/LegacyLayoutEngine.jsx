@@ -508,6 +508,8 @@ function ConstraintsPanel({rp,library}){
         <Num label="Širina" v={W} set={setW} min={1200} max={5000} step={50}/>
         <Num label="Globina" v={D} set={setD} min={1400} max={5000} step={50}/>
         <div className="wp"><span>Mokri zid</span><div className="rt wgrid">{["N","E","S","W"].map(w=><button key={w} className={wet===w?"on":""} onClick={()=>setWet(w)}>{({N:"sever",E:"vzhod",S:"jug",W:"zahod"})[w]}</button>)}</div></div>
+        <label className="softTgl inlineTgl"><input type="checkbox" checked={allowFloorRoutes} onChange={e=>setAllowFloorRoutes(e.target.checked)}/> <span>Dovoli napeljavo v tleh</span></label>
+        <div className="softNote">{allowFloorRoutes?"Talni priklopi lahko gredo naravnost po plošči.":"Talni priklopi se preusmerijo po steni do mokrega zidu."}</div>
 
         <div className="eyebrow mt">Vrata in okna</div>
         <div className="addRow">{Object.entries(library).filter(([,e])=>isDoor(e)||e.kind==="window").map(([k,e])=><button key={k} onClick={()=>addProgram(k)}>+ {e.name}</button>)}</div>
@@ -536,28 +538,25 @@ function ConstraintsPanel({rp,library}){
         <div className="ifaceNote">Vmesnik omejitev: zdaj jih vnašaš ti (steber, okno, obstoječa vrata). Kasneje jih engine za razporeditev sob napolni sam - kje so vrata, koliko m².</div>
       </div>
       <div className="col controlCol">
-        <Section k="input-paths" title="Pregled poti">
+        <Section k="input-paths-widths" title="Poti in širina">
           <label className="softTgl"><input type="checkbox" checked={showPaths} onChange={e=>setShowPaths(e.target.checked)}/> <span>Pokaži poti (vrata → element)</span></label>
+          <Num label="Minimalna (trdo)" v={pathMin} set={setPathMin} min={300} max={2400} step={50} c="#e2553f"/>
+          <Num label="Želena (mehko)" v={pathWant} set={setPathWant} min={300} max={3000} step={50} c="#5bbd8b"/>
+          {comfort&&<div className="softNote">Trenutno: najožja <b className="mono">{Math.round(comfort.minWidth)}</b> mm · udobje <b className="mono">{Math.round(comfort.ratio*100)}</b>.</div>}
           {paths.length>0 ? <div className="routeList">{paths.map((pt,i)=><div key={i} className="routeItem">
             <span>{pt.name} · {pt.reachable?(pt.minWidth>=pathWant?"udobno":"ozko"):"NI POTI"}</span>
             <b className="mono">{pt.reachable?Math.round(pt.minWidth)+" mm":"blok"}</b>
           </div>)}</div> : <div className="soft2 none">Poti se pokažejo po veljavni generaciji.</div>}
-        </Section>
-        <Section k="input-widths" title="Širina poti">
-          <Num label="Minimalna (trdo)" v={pathMin} set={setPathMin} min={300} max={2400} step={50} c="#e2553f"/>
-          <Num label="Želena (mehko)" v={pathWant} set={setPathWant} min={300} max={3000} step={50} c="#5bbd8b"/>
-          {comfort&&<div className="softNote">Trenutno: najožja <b className="mono">{Math.round(comfort.minWidth)}</b> mm · udobje <b className="mono">{Math.round(comfort.ratio*100)}</b>.</div>}
-          <div className="softNote">Minimalna je trda; želena je mehka in vpliva le na oceno udobja.</div>
-        </Section>
-        <Section k="input-floor" title="Talne trase">
-          <label className="softTgl"><input type="checkbox" checked={allowFloorRoutes} onChange={e=>setAllowFloorRoutes(e.target.checked)}/> <span>O5: talne trase dovoljene</span></label>
-          <div className="softNote">{allowFloorRoutes?"Priklopi, ki vodijo v tla, se trasirajo naravnost po plošči.":"Priklopi v tla se preusmerijo po steni do mokrega zidu."}</div>
+          <div className="softNote">Minimalna je trda: kandidat pade, če je pot ožja. Želena je mehka: kandidat ostane, vendar dobi slabšo oceno udobja.</div>
         </Section>
         <Section k="input-soft" title="Mehka pravila">
-          <label className="softTgl"><input type="checkbox" checked={soft} onChange={e=>setSoft(e.target.checked)}/> <span>Halo se sme upogniti</span></label>
-          <div className="softNote">{soft?"Halo se sme prekriti s kaznijo. Lok vrat ostane trdo pravilo.":"Strogo: vsako prekrivanje halo zavrne kandidat."}</div>
+          <label className="softTgl"><input type="checkbox" checked={soft} onChange={e=>setSoft(e.target.checked)}/> <span>Dovoli mehko prekrivanje halo</span></label>
+          <div className="softNote">{soft?"Mehka pravila ne zavrnejo kandidata takoj: prekrivanje halo dobi kazen v oceni. Trda pravila, kot so stena, jedro in lok vrat, ostanejo obvezna.":"Strogo: vsako prekrivanje halo zavrne kandidata."}</div>
         </Section>
-        <button className="regen" onClick={()=>setSeed(s=>s+1)}>↻ Generiraj</button>
+        <Section k="input-generate" title="Generiranje">
+          <button className="regen" onClick={()=>setSeed(s=>s+1)}>↻ Generiraj</button>
+          <div className="softNote">Generiraj ponovno premeša iskanje in naredi nov bazen veljavnih razporeditev za iste vhode. Ne spremeni pravil; spremeni samo poskus iskanja variant.</div>
+        </Section>
       </div>
     </aside>
   );
@@ -1163,7 +1162,7 @@ const CSS=`
 
 .grid3{display:grid;grid-template-columns:230px 1fr 256px;gap:1px;background:var(--bd)}
 @media(max-width:1080px){.grid3{grid-template-columns:1fr}}
-.constraints2{display:grid;grid-template-columns:minmax(300px,1.15fr) minmax(260px,.85fr);gap:1px;background:var(--bd)}
+.constraints2{display:grid;grid-template-columns:minmax(300px,1fr) minmax(220px,.55fr);gap:1px;background:var(--bd)}
 .constraints2 .col{min-width:0}.controlCol .sec{margin-bottom:8px}.controlCol .secHd{padding:10px 0}.controlCol .secBody{padding:0 0 10px}
 @media(max-width:1180px){.constraints2{grid-template-columns:1fr}}
 .elementCards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px;background:var(--bd);padding:1px;margin-bottom:1px}
@@ -1235,6 +1234,7 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .znum{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--mut)}.znum>span{width:10px}.znum input{flex:1;accent-color:#e2553f;height:3px}.znum b{width:34px;text-align:right;font-size:10px;color:var(--tx)}
 .ifaceNote{font-size:10.5px;color:#7fb8e6;background:#0e1e2e;border:1px solid #234a63;border-radius:7px;padding:10px;margin-top:12px;line-height:1.5}
 .softTgl{display:flex;gap:8px;align-items:center;font-size:12px;cursor:pointer;margin-top:16px}
+.inlineTgl{margin-top:10px}
 .softNote{font-size:10.5px;color:var(--mut);margin-top:6px;line-height:1.45}
 .poolBar{display:flex;gap:7px;align-items:center;padding:12px 16px;flex-wrap:wrap}.poolBar .mono{font-size:11px;color:var(--mut);margin-right:4px}
 .thumb{width:34px;height:30px;border-radius:7px;border:1px solid var(--bd);background:var(--p2);color:var(--mut);cursor:pointer;font-size:11px}.thumb.on{border-color:var(--cy);color:var(--cy)}
@@ -1288,7 +1288,7 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .phaseBody{background:var(--panel);border:1px solid var(--bd);border-radius:12px;overflow:hidden}
 .phaseLead{padding:14px 18px;font-size:12px;line-height:1.55;color:#9fb0bd;border-bottom:1px solid var(--bd);background:var(--p2)}
 .grid2c{display:grid;grid-template-columns:240px 1fr;gap:1px;background:var(--bd)}
-.grid2c.setupGrid{grid-template-columns:minmax(660px,1.05fr) minmax(420px,.95fr)}
+.grid2c.setupGrid{grid-template-columns:minmax(560px,.82fr) minmax(560px,1.18fr)}
 .grid2c.wide{grid-template-columns:1fr 290px}
 @media(max-width:1080px){.grid2c,.grid2c.wide{grid-template-columns:1fr}}
 @media(max-width:1180px){.grid2c.setupGrid{grid-template-columns:1fr}}
