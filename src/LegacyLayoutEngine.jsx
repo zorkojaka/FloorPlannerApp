@@ -695,7 +695,7 @@ function StagePanel({rp}){
       </div>
       <div className="stageRow">
         <div className="sheet">{best? (view==="3d"
-          ? <ThreeRoomView cand={best} cfg={cfg} routing={routing} layers={layers}/>
+          ? <ThreeRoomView cand={best} cfg={cfg} routing={routing} paths={paths} bandMin={pathMin} layers={layers}/>
           : wallView
           ? <ElevationView cand={best} cfg={cfg} wall={wallView} routing={routing} layers={layers}/>
           : <O2Plan cand={best} cfg={cfg} zones={zones} routing={routing} paths={paths} bandMin={pathMin} bandWant={pathWant} layers={layers}/>)
@@ -855,7 +855,7 @@ function O2Plan({cand,cfg,zones,routing,paths=[],bandMin=600,bandWant=900,layers
   </svg>;
 }
 
-function ThreeRoomView({cand,cfg,routing,layers=DEFAULT_LAYERS}){
+function ThreeRoomView({cand,cfg,routing,paths=[],bandMin=600,layers=DEFAULT_LAYERS}){
   const hostRef=useRef(null);
   useEffect(()=>{
     const host=hostRef.current;
@@ -941,6 +941,31 @@ function ThreeRoomView({cand,cfg,routing,layers=DEFAULT_LAYERS}){
       group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),mat));
     });
 
+    // POTI 3D (rang 1) — trak hoje od vrat do elementa, ležeč na tleh (širina = minimalna);
+    // rdeč X na mestu blokade, če pot ni prehodna. Plast "poti" v daljincu.
+    if(layers.paths){
+      const pathBand=new THREE.MeshStandardMaterial({color:"#3f7d5e",transparent:true,opacity:.34,roughness:.95,depthWrite:false});
+      const blockMat=new THREE.MeshStandardMaterial({color:"#e2553f",roughness:.7});
+      for(const pt of paths){
+        if(pt.reachable&&pt.path){
+          for(let i=1;i<pt.path.length;i+=1){
+            const a=pt.path[i-1],b=pt.path[i];
+            const dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy);
+            if(len<1)continue;
+            const seg=new THREE.Mesh(new THREE.BoxGeometry(len,14,Math.max(bandMin,60)),pathBand);
+            seg.position.set((a.x+b.x)/2-W/2,18,(a.y+b.y)/2-D/2);
+            seg.rotation.y=-Math.atan2(dy,dx);
+            group.add(seg);
+          }
+        }else if(pt.blockedAt){
+          const x=new THREE.Mesh(new THREE.BoxGeometry(200,40,40),blockMat);
+          x.position.set(pt.blockedAt.x-W/2,40,pt.blockedAt.y-D/2);x.rotation.y=Math.PI/4;group.add(x);
+          const x2=new THREE.Mesh(new THREE.BoxGeometry(200,40,40),blockMat);
+          x2.position.set(pt.blockedAt.x-W/2,40,pt.blockedAt.y-D/2);x2.rotation.y=-Math.PI/4;group.add(x2);
+        }
+      }
+    }
+
     const axes=new THREE.GridHelper(Math.max(W,D),Math.ceil(Math.max(W,D)/250),0xb9c0c7,0xd0d6dc);
     axes.position.y=1;
     group.add(axes);
@@ -996,7 +1021,7 @@ function ThreeRoomView({cand,cfg,routing,layers=DEFAULT_LAYERS}){
         }
       });
     };
-  },[cand,cfg,layers,routing]);
+  },[cand,cfg,layers,routing,paths,bandMin]);
   return <div className="threeHost" ref={hostRef} aria-label="3D pogled prostora"/>;
 }
 
