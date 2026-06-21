@@ -523,42 +523,45 @@ function ConstraintsPanel({rp,library}){
     </div>;
   };
   return (
-    <aside className="constraints2">
+    <aside className="constraints2 single">
       <div className="col inputCol">
-        <div className="eyebrow">Prostor</div>
-        <Num label="Širina" v={W} set={setW} min={1200} max={5000} step={50}/>
-        <Num label="Globina" v={D} set={setD} min={1400} max={5000} step={50}/>
-        <div className="wp"><span>Mokri zid</span><div className="rt wgrid">{["N","E","S","W"].map(w=><button key={w} className={wet===w?"on":""} onClick={()=>setWet(w)}>{({N:"sever",E:"vzhod",S:"jug",W:"zahod"})[w]}</button>)}</div></div>
-        <label className="softTgl inlineTgl"><input type="checkbox" checked={allowFloorRoutes} onChange={e=>setAllowFloorRoutes(e.target.checked)}/> <span>Dovoli napeljavo v tleh</span></label>
-        <div className="softNote">{allowFloorRoutes?"Talni priklopi lahko gredo naravnost po plošči.":"Talni priklopi se preusmerijo po steni do mokrega zidu."}</div>
+        <Section k="input-space" title="Prostor">
+          <Num label="Širina" v={W} set={setW} min={1200} max={5000} step={50}/>
+          <Num label="Globina" v={D} set={setD} min={1400} max={5000} step={50}/>
+          <div className="wp"><span>Mokri zid</span><div className="rt wgrid">{["N","E","S","W"].map(w=><button key={w} className={wet===w?"on":""} onClick={()=>setWet(w)}>{({N:"sever",E:"vzhod",S:"jug",W:"zahod"})[w]}</button>)}</div></div>
+          <label className="softTgl inlineTgl"><input type="checkbox" checked={allowFloorRoutes} onChange={e=>setAllowFloorRoutes(e.target.checked)}/> <span>Dovoli napeljavo v tleh</span></label>
+          <div className="softNote">{allowFloorRoutes?"Talni priklopi lahko gredo naravnost po plošči.":"Talni priklopi se preusmerijo po steni do mokrega zidu."}</div>
+        </Section>
 
-        <div className="eyebrow mt">Vrata in okna</div>
-        <div className="addRow">{Object.entries(library).filter(([,e])=>isDoor(e)||e.kind==="window").map(([k,e])=><button key={k} onClick={()=>addProgram(k)}>+ {e.name}</button>)}</div>
-        <div className="progList">{openings.map(renderItem)}</div>
-        {!hasDoor && <div className="warnNote">⚠ Soba rabi vsaj ena vrata. Dodaj jih, sicer ni veljavne rešitve.</div>}
+        <Section k="input-openings" title="Vrata in okna">
+          <div className="addRow">{Object.entries(library).filter(([,e])=>isDoor(e)||e.kind==="window").map(([k,e])=><button key={k} onClick={()=>addProgram(k)}>+ {e.name}</button>)}</div>
+          <div className="progList">{openings.map(renderItem)}</div>
+          {!hasDoor && <div className="warnNote">⚠ Soba rabi vsaj ena vrata. Dodaj jih, sicer ni veljavne rešitve.</div>}
+        </Section>
 
-        <div className="eyebrow mt">Program opreme</div>
-        <div className="addRow">{Object.entries(library).filter(([,e])=>!isDoor(e)&&e.kind!=="window").map(([k,e])=><button key={k} onClick={()=>addProgram(k)}>+ {e.name}</button>)}</div>
-        <div className="progList">{equipment.map(renderItem)}</div>
-        {cornerEls.length>0 && <div className="warnNote">Kotni elementi rabijo vogalno postavitev - pride kasneje.</div>}
-        {!feasibility.feasible && <div className="warnNote"><b>Predhodna izvedljivost</b><br/>{feasibility.reasons.map((r,i)=><span key={i}>{r}<br/></span>)}</div>}
+        <Section k="input-program" title="Program opreme">
+          <div className="addRow">{Object.entries(library).filter(([,e])=>!isDoor(e)&&e.kind!=="window").map(([k,e])=><button key={k} onClick={()=>addProgram(k)}>+ {e.name}</button>)}</div>
+          <div className="progList">{equipment.map(renderItem)}</div>
+          {cornerEls.length>0 && <div className="warnNote">Kotni elementi rabijo vogalno postavitev - pride kasneje.</div>}
+          {!feasibility.feasible && <div className="warnNote"><b>Predhodna izvedljivost</b><br/>{feasibility.reasons.map((r,i)=><span key={i}>{r}<br/></span>)}</div>}
+        </Section>
 
-        <div className="eyebrow mt">Realne omejitve sobe</div>
-        <button className="add" onClick={()=>setZones(z=>[...z,{id:uid(),x:Math.round(W*0.4),y:Math.round(D*0.35),w:600,h:600}])}>+ prepovedana cona</button>
-        {zones.map(z=>(
-          <div key={z.id} className="zone">
-            <div className="zTop"><span>prepovedana cona</span><button onClick={()=>setZones(Z=>Z.filter(x=>x.id!==z.id))}>×</button></div>
-            <div className="zGrid">
-              <ZNum label="x" v={z.x} set={v=>setZone(z.id,{x:v})} max={W}/>
-              <ZNum label="y" v={z.y} set={v=>setZone(z.id,{y:v})} max={D}/>
-              <ZNum label="š" v={z.w} set={v=>setZone(z.id,{w:v})} max={W}/>
-              <ZNum label="g" v={z.h} set={v=>setZone(z.id,{h:v})} max={D}/>
+        <Section k="input-zones" title="Realne omejitve sobe">
+          <button className="add" onClick={()=>setZones(z=>[...z,{id:uid(),x:Math.round(W*0.4),y:Math.round(D*0.35),w:600,h:600}])}>+ prepovedana cona</button>
+          {zones.map(z=>(
+            <div key={z.id} className="zone">
+              <div className="zTop"><span>prepovedana cona</span><button onClick={()=>setZones(Z=>Z.filter(x=>x.id!==z.id))}>×</button></div>
+              <div className="zGrid">
+                <ZNum label="x" v={z.x} set={v=>setZone(z.id,{x:v})} max={W}/>
+                <ZNum label="y" v={z.y} set={v=>setZone(z.id,{y:v})} max={D}/>
+                <ZNum label="š" v={z.w} set={v=>setZone(z.id,{w:v})} max={W}/>
+                <ZNum label="g" v={z.h} set={v=>setZone(z.id,{h:v})} max={D}/>
+              </div>
             </div>
-          </div>
-        ))}
-        <div className="ifaceNote">Vmesnik omejitev: zdaj jih vnašaš ti (steber, okno, obstoječa vrata). Kasneje jih engine za razporeditev sob napolni sam - kje so vrata, koliko m².</div>
-      </div>
-      <div className="col controlCol">
+          ))}
+          <div className="ifaceNote">Vmesnik omejitev: zdaj jih vnašaš ti (steber, okno, obstoječa vrata). Kasneje jih engine za razporeditev sob napolni sam - kje so vrata, koliko m².</div>
+        </Section>
+
         <Section k="input-paths-widths" title="Poti in širina">
           <label className="softTgl"><input type="checkbox" checked={showPaths} onChange={e=>setShowPaths(e.target.checked)}/> <span>Pokaži poti (vrata → element)</span></label>
           <Num label="Minimalna (trdo)" v={pathMin} set={setPathMin} min={300} max={2400} step={50} c="#e2553f"/>
@@ -1184,6 +1187,7 @@ const CSS=`
 .grid3{display:grid;grid-template-columns:230px 1fr 256px;gap:1px;background:var(--bd)}
 @media(max-width:1080px){.grid3{grid-template-columns:1fr}}
 .constraints2{display:grid;grid-template-columns:minmax(300px,1fr) minmax(220px,.55fr);gap:1px;background:var(--bd)}
+.constraints2.single{grid-template-columns:1fr}
 .constraints2 .col{min-width:0}.controlCol .sec{margin-bottom:8px}.controlCol .secHd{padding:10px 0}.controlCol .secBody{padding:0 0 10px}
 @media(max-width:1180px){.constraints2{grid-template-columns:1fr}}
 .elementCards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px;background:var(--bd);padding:1px;margin-bottom:1px}
