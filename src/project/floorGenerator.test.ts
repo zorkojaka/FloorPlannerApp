@@ -6,7 +6,8 @@ describe('project floor generator', () => {
   const brief: ProjectBrief = {
     id: 'demo-floor',
     name: 'Demo floor',
-    boundary: { area: 80, width: 10, depth: 8 },
+      boundary: { area: 80, width: 10, depth: 8 },
+      corridorPolicy: { minWidth: 1.2, mainWidth: 1.8, sideWidth: 1.2 },
     rooms: [
       { id: 'wc', type: 'wc', count: 1 },
       { id: 'office', type: 'office', count: 2, workstations: 1 },
@@ -18,7 +19,7 @@ describe('project floor generator', () => {
     const layout = generateStripFloorLayout(brief);
     expect(layout.corridor.type).toBe('corridor');
     expect(layout.corridor.w).toBe(10);
-    expect(layout.corridor.d).toBe(1.4);
+    expect(layout.corridor.d).toBe(1.8);
     expect(layout.rooms.map((room) => room.type)).toEqual(['wc', 'office', 'office']);
     expect(layout.rooms.every((room) => room.doorToCorridor)).toBe(true);
     expect(layout.fitsBoundary).toBe(true);
@@ -51,9 +52,10 @@ describe('project floor generator', () => {
       ],
     });
     expect(layout.corridor.x).toBeGreaterThan(0);
-    expect(layout.corridor.w).toBe(1.4);
+    expect(layout.corridor.w).toBe(1.8);
     expect(layout.corridor.d).toBe(8);
     expect(layout.corridorLinks).toHaveLength(3);
+    expect(layout.corridorLinks.every((link) => Math.abs(link.d - 1.2) < 0.01 || Math.abs(link.w - 1.2) < 0.01)).toBe(true);
     expect(layout.corridorLinks.every((link) => link.type === 'corridor')).toBe(true);
     expect(layout.entrances.map((entry) => entry.id)).toEqual(['west-main', 'east-service', 'south-extra']);
   });

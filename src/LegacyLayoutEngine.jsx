@@ -124,6 +124,7 @@ const DEFAULT_PROJECT = {
   name:"Demo etaža",
   boundary:{area:80,width:10,depth:8},
   entrances:[{id:"entry-1",wall:"S",position:0.5,width:1.2}],
+  corridorPolicy:{minWidth:1.2,mainWidth:1.8,sideWidth:1.2},
   rooms:[
     {id:"wc",type:"wc",count:1},
     {id:"office",type:"office",count:2,workstations:1},
@@ -138,6 +139,14 @@ function ProjectWorkflow({onContinue}){
   const [selectedRoomId,setSelectedRoomId]=usePersistentState("floorplanner.project.selectedRoomId",null);
   const updateBoundary=(patch)=>setBrief(b=>({...b,boundary:{...b.boundary,...patch}}));
   const updateRoom=(type,patch)=>setBrief(b=>({...b,rooms:b.rooms.map(r=>r.type===type?{...r,...patch}:r)}));
+  const corridorPolicy=brief.corridorPolicy||{minWidth:1.2,mainWidth:1.8,sideWidth:1.2};
+  const updateCorridorPolicy=(patch)=>setBrief(b=>{
+    const next={...(b.corridorPolicy||corridorPolicy),...patch};
+    next.minWidth=round1(next.minWidth);
+    next.mainWidth=Math.max(next.minWidth,round1(next.mainWidth));
+    next.sideWidth=Math.max(next.minWidth,Math.min(next.mainWidth,round1(next.sideWidth)));
+    return {...b,corridorPolicy:next};
+  });
   const entrances=brief.entrances?.length?brief.entrances:[{id:"entry-1",wall:"S",position:0.5,width:1.2}];
   const setEntrance=(id,patch)=>setBrief(b=>({...b,entrances:entrances.map(e=>e.id===id?{...e,...patch}:e)}));
   const addEntrance=()=>setBrief(b=>({...b,entrances:[...entrances,{id:uid(),wall:"S",position:0.5,width:1.2}]}));
@@ -174,6 +183,11 @@ function ProjectWorkflow({onContinue}){
           </div>)}
         </div>
         <button className="add" onClick={addEntrance}>+ vhod</button>
+        <div className="eyebrow mt">Širine hodnikov</div>
+        <ProjectNum label="Minimalna" unit="m" v={corridorPolicy.minWidth} set={v=>updateCorridorPolicy({minWidth:v})} min={0.9} max={3} step={0.1}/>
+        <ProjectNum label="Glavni hodnik" unit="m" v={corridorPolicy.mainWidth} set={v=>updateCorridorPolicy({mainWidth:v})} min={0.9} max={4} step={0.1}/>
+        <ProjectNum label="Stranski hodnik" unit="m" v={corridorPolicy.sideWidth} set={v=>updateCorridorPolicy({sideWidth:v})} min={0.9} max={4} step={0.1}/>
+        <div className="softNote">Glavni hodnik je širša hrbtenica; stranski hodniki povežejo vhode do nje. Kasneje te širine induciramo iz IFC referenc.</div>
         <div className="eyebrow mt">Program sob</div>
         <ProjectNum label="WC" unit="" v={brief.rooms.find(r=>r.type==="wc")?.count??0} set={v=>updateRoom("wc",{count:Math.round(v)})} min={0} max={8} step={1}/>
         <ProjectNum label="Pisarne" unit="" v={brief.rooms.find(r=>r.type==="office")?.count??0} set={v=>updateRoom("office",{count:Math.round(v)})} min={0} max={20} step={1}/>

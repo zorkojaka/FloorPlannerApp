@@ -5,6 +5,17 @@ const SUPPORTED_CLEARANCE_ELEMENTS = new Set(['toilet', 'sink', 'desk', 'chair',
 
 export function observationsFromNormalizedPlan(plan: NormalizedIfcPlan): ReferenceObservation[] {
   const observations: ReferenceObservation[] = [];
+  for (const corridor of plan.corridors || []) {
+    observations.push({
+      ref: `${plan.sourceId}:${corridor.sourceId}:corridor-width`,
+      roomType: 'corridor',
+      scope: 'room-type',
+      elementKey: 'corridor',
+      parameter: corridor.role === 'main' ? 'corridor-width-main' : 'corridor-width-side',
+      value: Math.round(corridor.width),
+      note: `Extracted ${corridor.role} corridor width from normalized IFC plan ${plan.name}`,
+    });
+  }
   for (const room of plan.rooms) {
     for (const element of room.elements) {
       if (!SUPPORTED_CLEARANCE_ELEMENTS.has(element.elementKey)) continue;

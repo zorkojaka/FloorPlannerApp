@@ -1,6 +1,10 @@
 {
   "sourceId": "fixture-demo-001",
   "name": "Normalized WC and office demo",
+  "corridors": [
+    { "sourceId": "corridor-main", "name": "Main corridor", "role": "main", "width": 2100 },
+    { "sourceId": "corridor-side", "name": "Side corridor", "role": "side", "width": 1300 }
+  ],
   "rooms": [
     {
       "sourceId": "space-wc-01",

@@ -23,8 +23,16 @@ export interface NormalizedIfcRoom {
   elements: NormalizedIfcElement[];
 }
 
+export interface NormalizedIfcCorridor {
+  sourceId: string;
+  name: string;
+  role: 'main' | 'side';
+  width: number;
+}
+
 export interface NormalizedIfcPlan {
   sourceId: string;
   name: string;
+  corridors?: NormalizedIfcCorridor[];
   rooms: NormalizedIfcRoom[];
 }

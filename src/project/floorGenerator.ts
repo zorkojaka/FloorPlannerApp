@@ -1,4 +1,4 @@
-import { estimateProjectArea, estimateRoomProgramArea, ROOM_TYPE_DEFINITIONS, type ProjectBrief, type ProjectEntrance, type RoomProgram, type RoomType } from './roomTypes';
+import { estimateProjectArea, estimateRoomProgramArea, ROOM_TYPE_DEFINITIONS, type CorridorPolicy, type ProjectBrief, type ProjectEntrance, type RoomProgram, type RoomType } from './roomTypes';
 
 export interface PlacedRoom {
   id: string;
@@ -24,6 +24,7 @@ export interface FloorLayout {
   rooms: PlacedRoom[];
   corridor: PlacedRoom;
   corridorLinks: PlacedRoom[];
+  corridorPolicy: CorridorPolicy;
   entrances: ProjectEntrance[];
   fitsBoundary: boolean;
   remainingArea: number;
@@ -39,7 +40,9 @@ export interface FloorLayoutOptions {
 
 export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayoutOptions | number = {}): FloorLayout {
   const opts: FloorLayoutOptions = typeof options === 'number' ? { corridorWidth: options } : options;
-  const corridorWidth = opts.corridorWidth ?? 1.4;
+  const corridorPolicy = normalizeCorridorPolicy(brief, opts.corridorWidth);
+  const corridorWidth = corridorPolicy.mainWidth;
+  const sideCorridorWidth = corridorPolicy.sideWidth;
   const entrances = normalizeEntrances(brief);
   const primaryEntrance = entrances[0];
   const corridorSide = opts.corridorSide ?? sideFromEntrance(primaryEntrance);
@@ -64,7 +67,7 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
     area: (verticalCorridor ? boundary.depth : boundary.width) * corridorWidth,
     doorToCorridor: false,
   };
-  const corridorLinks = buildEntranceLinks(entrances, boundary, corridor, corridorWidth);
+  const corridorLinks = buildEntranceLinks(entrances, boundary, corridor, sideCorridorWidth);
 
   const roomSideStart = verticalCorridor
     ? (corridor.x + corridor.w <= boundary.width / 2 ? corridor.x + corridor.w : 0)
@@ -112,6 +115,7 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
     rooms,
     corridor,
     corridorLinks,
+    corridorPolicy,
     entrances,
     fitsBoundary: warnings.length === 0 && usedArea <= boundary.area,
     remainingArea: roundToGrid(boundary.area - usedArea),
@@ -124,7 +128,7 @@ export function generateFloorLayoutPool(brief: ProjectBrief): FloorLayout[] {
   const sides = brief.entrances?.length ? [sideFromEntrance(normalizeEntrances(brief)[0])] : ['south', 'north'];
   for (const corridorSide of sides as Array<'south' | 'north' | 'west' | 'east'>) {
     for (const roomOrder of ['program', 'reverse', 'offices-first', 'wc-first'] as const) {
-      for (const corridorWidth of [1.2, 1.4, 1.8]) {
+      for (const corridorWidth of corridorWidthVariants(brief)) {
         variants.push({ corridorSide, roomOrder, corridorWidth, id: `${corridorSide}-${roomOrder}-${corridorWidth}` });
       }
     }
@@ -136,6 +140,20 @@ export function generateFloorLayoutPool(brief: ProjectBrief): FloorLayout[] {
     if (!unique.has(key)) unique.set(key, layout);
   }
   return [...unique.values()];
+}
+
+function normalizeCorridorPolicy(brief: ProjectBrief, candidateMainWidth?: number): CorridorPolicy {
+  const base = brief.corridorPolicy || { minWidth: 1.2, mainWidth: 1.8, sideWidth: 1.2 };
+  const minWidth = Math.max(0.8, base.minWidth || 1.2);
+  const mainWidth = Math.max(minWidth, candidateMainWidth ?? base.mainWidth ?? minWidth);
+  const sideWidth = Math.max(minWidth, Math.min(base.sideWidth ?? minWidth, mainWidth));
+  return { minWidth, mainWidth, sideWidth };
+}
+
+function corridorWidthVariants(brief: ProjectBrief): number[] {
+  const policy = normalizeCorridorPolicy(brief);
+  const widths = [policy.mainWidth, policy.mainWidth + 0.4, Math.max(policy.minWidth, policy.mainWidth - 0.3)];
+  return [...new Set(widths.map((width) => roundToGrid(width)).filter((width) => width >= policy.minWidth))];
 }
 
 function buildEntranceLinks(

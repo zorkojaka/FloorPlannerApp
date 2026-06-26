@@ -1,7 +1,7 @@
 import type { ElementLibrary } from '../elements/library';
 import type { Envelope, RuleScope } from './envelope';
 
-export type InductionParameter = 'clearance-front';
+export type InductionParameter = 'clearance-front' | 'corridor-width-main' | 'corridor-width-side';
 
 export interface ReferenceObservation {
   ref: string;
@@ -85,7 +85,7 @@ export function parseReferenceJson(raw: string): ReferenceObservation[] {
     if (!item || typeof item !== 'object') throw new Error(`Referenca #${index + 1} ni objekt.`);
     if (typeof item.ref !== 'string') throw new Error(`Referenca #${index + 1} nima polja ref.`);
     if (typeof item.elementKey !== 'string') throw new Error(`Referenca ${item.ref} nima polja elementKey.`);
-    if (item.parameter !== 'clearance-front') throw new Error(`Referenca ${item.ref} ima nepodprt parameter.`);
+    if (!['clearance-front', 'corridor-width-main', 'corridor-width-side'].includes(item.parameter)) throw new Error(`Referenca ${item.ref} ima nepodprt parameter.`);
     if (!Number.isFinite(item.value)) throw new Error(`Referenca ${item.ref} nima numericne value.`);
     return item as ReferenceObservation;
   });

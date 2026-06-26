@@ -33,11 +33,18 @@ export interface ProjectEntrance {
   width: number;
 }
 
+export interface CorridorPolicy {
+  minWidth: number;
+  mainWidth: number;
+  sideWidth: number;
+}
+
 export interface ProjectBrief {
   id: string;
   name: string;
   boundary: ProjectBoundary;
   entrances?: ProjectEntrance[];
+  corridorPolicy?: CorridorPolicy;
   rooms: RoomProgram[];
 }
 
@@ -92,6 +99,12 @@ export function validateProjectBrief(brief: ProjectBrief): string[] {
     if (!['N', 'E', 'S', 'W'].includes(entrance.wall)) errors.push(`Entrance ${entrance.id} has unsupported wall.`);
     if (!Number.isFinite(entrance.position) || entrance.position < 0 || entrance.position > 1) errors.push(`Entrance ${entrance.id} position must be between 0 and 1.`);
     if (!Number.isFinite(entrance.width) || entrance.width <= 0) errors.push(`Entrance ${entrance.id} width must be positive.`);
+  }
+  if (brief.corridorPolicy) {
+    const { minWidth, mainWidth, sideWidth } = brief.corridorPolicy;
+    if (!Number.isFinite(minWidth) || minWidth <= 0) errors.push('Corridor minimum width must be positive.');
+    if (!Number.isFinite(mainWidth) || mainWidth < minWidth) errors.push('Main corridor width must be at least the minimum width.');
+    if (!Number.isFinite(sideWidth) || sideWidth < minWidth) errors.push('Side corridor width must be at least the minimum width.');
   }
   for (const room of brief.rooms) {
     if (!ROOM_TYPE_DEFINITIONS[room.type]) errors.push(`Unsupported room type: ${room.type}`);

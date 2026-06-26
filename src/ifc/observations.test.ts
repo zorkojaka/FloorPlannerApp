@@ -7,6 +7,10 @@ describe('normalized IFC observations', () => {
     const plan: NormalizedIfcPlan = {
       sourceId: 'ifc-demo',
       name: 'Demo IFC export',
+      corridors: [
+        { sourceId: 'corridor-main', name: 'Main corridor', role: 'main', width: 2100 },
+        { sourceId: 'corridor-side', name: 'Side corridor', role: 'side', width: 1300 },
+      ],
       rooms: [
         {
           sourceId: 'space-wc-01',
@@ -23,6 +27,24 @@ describe('normalized IFC observations', () => {
     };
 
     expect(observationsFromNormalizedPlan(plan)).toEqual([
+      {
+        ref: 'ifc-demo:corridor-main:corridor-width',
+        roomType: 'corridor',
+        scope: 'room-type',
+        elementKey: 'corridor',
+        parameter: 'corridor-width-main',
+        value: 2100,
+        note: 'Extracted main corridor width from normalized IFC plan Demo IFC export',
+      },
+      {
+        ref: 'ifc-demo:corridor-side:corridor-width',
+        roomType: 'corridor',
+        scope: 'room-type',
+        elementKey: 'corridor',
+        parameter: 'corridor-width-side',
+        value: 1300,
+        note: 'Extracted side corridor width from normalized IFC plan Demo IFC export',
+      },
       {
         ref: 'ifc-demo:space-wc-01:toilet-01:clearance-front',
         roomType: 'wc',

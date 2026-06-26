@@ -301,5 +301,6 @@ Implementirati fazo 1: model projekta, tipe sob in osnovno oceno kvadrature.
 - Dodan prvi deterministicen strip generator etaže: hodnik + sobe ob hodniku.
 - Dodan vmesni A/B izbor kandidatov etaže.
 - Projektni nivo podpira več glavnih vhodov v etažo; prvi vhod določa glavno smer hodnika, vsi vhodi so izrisani na tlorisu.
+- Hodniki imajo politiko širine: minimalna širina, širina glavnega hodnika in širina stranskih priključkov. Normalized IFC observations podpirajo ločeno indukcijo `corridor-width-main` in `corridor-width-side`.
 - Dodani osnovni pisarniški elementi: pisalna miza, pisarniški stol, omara.
 - Dodan `NormalizedIfcPlan` fixture format in pretvorba v induction observations.
