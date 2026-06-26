@@ -24,6 +24,8 @@ import { estimateProjectArea } from "./project/roomTypes";
 import { floorSignals, initialFloorPreferenceState, rankFloorLayouts, recordFloorPreference, scoreFloorLayout } from "./project/floorPreference";
 import { roomConstraintsFromPlacedRoom } from "./project/roomAdapter";
 import { extractFloorStrategyObservations, induceFloorStrategyProfile, rankFloorLayoutsByProfile, scoreFloorLayoutByProfile } from "./ifc/floorStrategy";
+import { IFC_REFERENCE_SETS } from "./training/ifcReferenceSets";
+import { projectTrainingFromIfcSummary } from "./project/projectTraining";
 
 /* =========================================================================
    ZAKLENJEN SISTEM - harmonika orehov
@@ -98,7 +100,7 @@ function Workflow({library,setLibrary}){
         </button>
       ))}
     </div>
-    {phase==="faza0" && <div className="phaseBody"><div className="phaseLead">Faza 0 — šolanje: vržeš noter primere dobre prakse, sistem izlušči znanje (envelope, prior kanalov). Zgodi se enkrat/občasno, ne pri vsakem projektu.</div><O9 library={library} setLibrary={setLibrary}/></div>}
+    {phase==="faza0" && <div className="phaseBody"><div className="phaseLead">Faza 0 — šolanje: vržeš noter primere dobre prakse, sistem izlušči znanje (envelope, prior kanalov). Zgodi se enkrat/občasno, ne pri vsakem projektu.</div><O9 library={library} setLibrary={setLibrary} onOpenProject={()=>setPhase("projekt")}/></div>}
     {phase==="projekt" && <ProjectWorkflow onContinue={(room)=>{if(room)rp.applyRoomConstraints(roomConstraintsFromPlacedRoom(room));setPhase("korak2");}}/>}
     {phase==="korak1" && <div className="phaseBody"><O1 library={library} setLibrary={setLibrary}/></div>}
     {phase==="korak2" && <div className="phaseBody">
@@ -185,9 +187,9 @@ function ProjectWorkflow({onContinue}){
     <div className="projectGrid">
       <aside className="col projectInputs">
         <div className="eyebrow">Okvir etaže</div>
-        <ProjectNum label="Površina" unit="m²" v={brief.boundary.area} set={v=>updateBoundary({area:v,width:brief.boundary.width,depth:round1(v/Math.max(brief.boundary.width||1,1))})} min={20} max={500} step={5}/>
-        <ProjectNum label="Širina" unit="m" v={brief.boundary.width} set={v=>updateBoundary({width:v,area:round1(v*(brief.boundary.depth||1))})} min={4} max={40} step={0.5}/>
-        <ProjectNum label="Globina" unit="m" v={brief.boundary.depth} set={v=>updateBoundary({depth:v,area:round1((brief.boundary.width||1)*v)})} min={4} max={40} step={0.5}/>
+        <ProjectNum label="Površina" unit="m²" v={brief.boundary.area} set={v=>updateBoundary({area:v,width:brief.boundary.width,depth:round1(v/Math.max(brief.boundary.width||1,1))})} min={20} max={2500} step={5}/>
+        <ProjectNum label="Širina" unit="m" v={brief.boundary.width} set={v=>updateBoundary({width:v,area:round1(v*(brief.boundary.depth||1))})} min={4} max={120} step={0.5}/>
+        <ProjectNum label="Globina" unit="m" v={brief.boundary.depth} set={v=>updateBoundary({depth:v,area:round1((brief.boundary.width||1)*v)})} min={4} max={80} step={0.5}/>
         <div className="eyebrow mt">Glavni vhodi</div>
         <div className="entranceList">
           {entrances.map((entry,i)=><div key={entry.id} className="entranceItem">
@@ -210,10 +212,10 @@ function ProjectWorkflow({onContinue}){
         </div>
         {strategyProfile&&<div className="softNote">Aktiven profil: <b>{strategyProfile.name}</b> · cluster {Math.round(strategyProfile.preferClusteredWc*100)} · spread {Math.round(strategyProfile.preferSpreadWc*100)} · križni hodniki {Math.round(strategyProfile.preferInternalCorridors*100)}</div>}
         <div className="eyebrow mt">Program sob</div>
-        <ProjectNum label="Moški WC" unit="" v={maleWc.count??0} set={v=>upsertRoom(maleWc.id,"wc",{wcKind:"male",count:Math.round(v)})} min={0} max={8} step={1}/>
-        <ProjectNum label="Ženski WC" unit="" v={femaleWc.count??0} set={v=>upsertRoom(femaleWc.id,"wc",{wcKind:"female",count:Math.round(v)})} min={0} max={8} step={1}/>
-        <ProjectNum label="Unisex WC" unit="" v={unisexWc.count??0} set={v=>upsertRoom(unisexWc.id,"wc",{wcKind:"unisex",count:Math.round(v)})} min={0} max={8} step={1}/>
-        <ProjectNum label="Pisarne" unit="" v={brief.rooms.find(r=>r.type==="office")?.count??0} set={v=>updateRoom("office",{count:Math.round(v)})} min={0} max={20} step={1}/>
+        <ProjectNum label="Moški WC" unit="" v={maleWc.count??0} set={v=>upsertRoom(maleWc.id,"wc",{wcKind:"male",count:Math.round(v)})} min={0} max={30} step={1}/>
+        <ProjectNum label="Ženski WC" unit="" v={femaleWc.count??0} set={v=>upsertRoom(femaleWc.id,"wc",{wcKind:"female",count:Math.round(v)})} min={0} max={30} step={1}/>
+        <ProjectNum label="Unisex WC" unit="" v={unisexWc.count??0} set={v=>upsertRoom(unisexWc.id,"wc",{wcKind:"unisex",count:Math.round(v)})} min={0} max={30} step={1}/>
+        <ProjectNum label="Pisarne" unit="" v={brief.rooms.find(r=>r.type==="office")?.count??0} set={v=>updateRoom("office",{count:Math.round(v)})} min={0} max={100} step={1}/>
         <ProjectNum label="Mest / pisarno" unit="" v={brief.rooms.find(r=>r.type==="office")?.workstations??1} set={v=>updateRoom("office",{workstations:Math.round(v)})} min={1} max={8} step={1}/>
         <div className="metricStack">
           <span>program <b>{summary.roomArea.toFixed(1)} m²</b></span>
@@ -395,12 +397,21 @@ const SAMPLE_REFS = JSON.stringify([
   {ref:"WC-ref-06",scope:"global",elementKey:"sink",parameter:"clearance-front",value:620,note:"visitor WC"}
 ],null,2);
 
-function O9({library,setLibrary}){
+function O9({library,setLibrary,onOpenProject}){
   const [raw,setRaw]=usePersistentState("floorplanner.o9.references",SAMPLE_REFS);
   const [rules,setRules]=usePersistentState("floorplanner.o9.rules",[]);
   const [metrics,setMetrics]=usePersistentState("floorplanner.o9.metrics",null);
+  const [trainingStatus,setTrainingStatus]=useState("");
   const [err,setErr]=useState("");
   const loadPreset=(items)=>setRaw(JSON.stringify(items,null,2));
+  const applyProjectTraining=(summary)=>{
+    const training=projectTrainingFromIfcSummary(summary);
+    saveJson(typeof window==="undefined"?undefined:window.localStorage,"floorplanner.project.brief",training.brief);
+    saveJson(typeof window==="undefined"?undefined:window.localStorage,"floorplanner.project.strategyProfile",training.profile);
+    saveJson(typeof window==="undefined"?undefined:window.localStorage,"floorplanner.project.pairIndex",0);
+    setTrainingStatus(`${training.name}: ${training.evidence.rooms} sob, ${training.evidence.wc} WC, ${training.evidence.office} pisarn, hodnik ${training.evidence.mainCorridorMm} mm`);
+    onOpenProject?.();
+  };
   const run=()=>{
     try{
       const refs=parseReferenceJson(raw);
@@ -416,6 +427,24 @@ function O9({library,setLibrary}){
   const apply=()=>setLibrary(L=>applyInducedRules(L,rules));
   return <div className="o9 grid3">
     <aside className="col">
+      <div className="eyebrow">IFC učne reference</div>
+      <div className="ifcTrainingList">
+        {IFC_REFERENCE_SETS.map(summary=>{
+          const training=projectTrainingFromIfcSummary(summary);
+          return <div key={summary.id} className="ifcTrainingCard">
+            <div className="rHead"><b>{summary.name}</b><span>{summary.spaces} IfcSpace</span></div>
+            <div className="envGrid">
+              <span>sob <b>{training.evidence.rooms}</b></span>
+              <span>WC <b>{training.evidence.wc}</b></span>
+              <span>pisarne <b>{training.evidence.office}</b></span>
+              <span>hodnik <b>{training.evidence.mainCorridorMm} mm</b></span>
+            </div>
+            <div className="ruleMeta">vrata {summary.entityCounts.IfcDoor||0} · okna {summary.entityCounts.IfcWindow||0} · file {summary.file}</div>
+            <button className="regen" onClick={()=>applyProjectTraining(summary)}>Uporabi v projektu</button>
+          </div>;
+        })}
+      </div>
+      {trainingStatus&&<div className="softNote">Uporabljeno: {trainingStatus}</div>}
       <div className="eyebrow">Reference JSON</div>
       <div className="presetRow">
         <button onClick={()=>loadPreset(CLASSIC_BATHROOM_REFS)}>Naloži klasične kopalnice</button>
@@ -1532,6 +1561,9 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .presetRow{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:0 0 9px}
 .presetRow button{background:var(--bg);border:1px solid var(--bd);color:var(--mut);border-radius:7px;padding:8px 7px;font-size:10.5px;cursor:pointer}
 .presetRow button:hover{border-color:var(--cy);color:var(--cy)}
+.ifcTrainingList{display:grid;gap:9px;margin-bottom:14px}
+.ifcTrainingCard{background:var(--p2);border:1px solid var(--bd);border-radius:8px;padding:10px}
+.ifcTrainingCard .regen{margin-top:10px}
 .ruleStage{flex:1;margin:0 16px 16px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;align-content:start}
 .ruleCard{background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:12px}.rHead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:10px}.rHead b{font-size:13px}.rHead span{font-size:10px;color:var(--mut)}
 .metricCard{border-color:#1f4444;background:#13282a}

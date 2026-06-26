@@ -305,3 +305,4 @@ Implementirati fazo 1: model projekta, tipe sob in osnovno oceno kvadrature.
 - Dodani osnovni pisarniški elementi: pisalna miza, pisarniški stol, omara.
 - Dodan `NormalizedIfcPlan` fixture format in pretvorba v induction observations.
 - Dodan dokaz za projektno indukcijo strategije etaže: normalizirane reference izluščijo profil (`centralni WC` ali `razpršeni WC`), isti bazen kandidatov pa se po profilu rangira drugače. S tem preverimo, da reference spreminjajo vedenje brez spremembe generatorja.
+- Dodan integriran IFC training bridge: uvoženi IFC povzetki so vidni v fazi Šolanje, z enim klikom napolnijo projektni brief, širine hodnikov, moški/ženski/unisex WC program in profil rangiranja. Institute primer ustvari izvedljiv poslovni program brez frontage overflow opozoril.
