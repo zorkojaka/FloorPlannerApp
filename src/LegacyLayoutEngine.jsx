@@ -18,6 +18,7 @@ import { defaultChannels, effectiveWeight, learnChannelsFromPreference, rankByCh
 import { applyInducedRules, induceRules, parseReferenceJson } from "./rules/induction";
 import { clamp, uid } from "./shared/math";
 import { loadJson, saveJson } from "./shared/storage";
+import { ACCESSIBLE_BATHROOM_REFS, CLASSIC_BATHROOM_REFS } from "./training/classicBathroomRefs";
 
 /* =========================================================================
    ZAKLENJEN SISTEM - harmonika orehov
@@ -197,6 +198,7 @@ function O9({library,setLibrary}){
   const [rules,setRules]=usePersistentState("floorplanner.o9.rules",[]);
   const [metrics,setMetrics]=usePersistentState("floorplanner.o9.metrics",null);
   const [err,setErr]=useState("");
+  const loadPreset=(items)=>setRaw(JSON.stringify(items,null,2));
   const run=()=>{
     try{
       const refs=parseReferenceJson(raw);
@@ -213,6 +215,10 @@ function O9({library,setLibrary}){
   return <div className="o9 grid3">
     <aside className="col">
       <div className="eyebrow">Reference JSON</div>
+      <div className="presetRow">
+        <button onClick={()=>loadPreset(CLASSIC_BATHROOM_REFS)}>Naloži klasične kopalnice</button>
+        <button onClick={()=>loadPreset([...CLASSIC_BATHROOM_REFS,...ACCESSIBLE_BATHROOM_REFS])}>+ dostopni primeri</button>
+      </div>
       <textarea className="refBox" value={raw} onChange={e=>setRaw(e.target.value)} spellCheck="false"/>
       <button className="regen" onClick={run}>Izlušči pravila</button>
       {rules.length>0&&<button className="regen" onClick={apply}>Uporabi v knjižnici</button>}
@@ -1316,6 +1322,9 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .chBars{display:grid;gap:4px}.chBars span{position:relative;overflow:hidden;background:var(--bg);border:1px solid var(--bd);border-radius:5px;padding:4px 6px;font-size:9.5px;color:var(--mut)}.chBars span:before{content:"";position:absolute;inset:0 auto 0 0;width:var(--w);background:#16b3b333}.chBars span{z-index:0}.chBars span::after{content:"";position:relative}
 .chScore{font-size:10px;color:var(--mut)}.chScore b{float:right;color:var(--cy)}
 .refBox{width:100%;min-height:420px;resize:vertical;background:var(--bg);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:10.5px;line-height:1.45;padding:10px}
+.presetRow{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:0 0 9px}
+.presetRow button{background:var(--bg);border:1px solid var(--bd);color:var(--mut);border-radius:7px;padding:8px 7px;font-size:10.5px;cursor:pointer}
+.presetRow button:hover{border-color:var(--cy);color:var(--cy)}
 .ruleStage{flex:1;margin:0 16px 16px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;align-content:start}
 .ruleCard{background:var(--panel);border:1px solid var(--bd);border-radius:8px;padding:12px}.rHead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:10px}.rHead b{font-size:13px}.rHead span{font-size:10px;color:var(--mut)}
 .metricCard{border-color:#1f4444;background:#13282a}
