@@ -17,6 +17,11 @@ export function roomConstraintsFromPlacedRoom(room: PlacedRoom): RoomConstraints
 }
 
 function fixturesForRoom(room: PlacedRoom): ProgramInstance[] {
+  if (room.type === 'wc' && room.wcKind === 'male') return [
+    { id: `${room.id}-toilet`, key: 'toilet' },
+    { id: `${room.id}-urinal`, key: 'urinal' },
+    { id: `${room.id}-sink`, key: 'sink' },
+  ];
   if (room.type === 'wc') return [
     { id: `${room.id}-toilet`, key: 'toilet' },
     { id: `${room.id}-sink`, key: 'sink' },

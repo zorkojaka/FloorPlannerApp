@@ -1,4 +1,4 @@
-import type { RoomType } from '../project/roomTypes';
+import type { RoomType, WcKind } from '../project/roomTypes';
 import type { NormalizedIfcCorridor, NormalizedIfcPlan, NormalizedIfcRoom } from './normalizedPlan';
 
 export interface IfcTextImportSummary {
@@ -83,6 +83,7 @@ export function parseIfcTextToNormalizedPlan(text: string, sourceId = 'ifc-impor
         sourceId: record.id.slice(1),
         name,
         roomType,
+        wcKind: classifyWcKind(name),
         w: Math.round(dimensions.w),
         d: Math.round(dimensions.d),
         elements: [],
@@ -176,6 +177,13 @@ function classifyRoomType(name: string): RoomType {
   if (/\b(wc|toilet|toilette|sanit.r|bad)\b/.test(normalized)) return 'wc';
   if (/\b(flur|gang|korridor|corridor|hall|treppe)\b/.test(normalized)) return 'corridor';
   return 'office';
+}
+
+function classifyWcKind(name: string): WcKind | undefined {
+  const normalized = name.toLocaleLowerCase('de-DE');
+  if (/\b(herren|maenner|m.nner|men|male|moški|moski)\b/.test(normalized)) return 'male';
+  if (/\b(damen|frauen|women|female|ženski|zenski)\b/.test(normalized)) return 'female';
+  return undefined;
 }
 
 function corridorRole(name: string, dimensions: { w: number; d: number }): 'main' | 'side' {

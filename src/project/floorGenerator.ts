@@ -1,9 +1,10 @@
-import { estimateProjectArea, estimateRoomProgramArea, ROOM_TYPE_DEFINITIONS, type CorridorPolicy, type ProjectBrief, type ProjectEntrance, type RoomProgram, type RoomType } from './roomTypes';
+import { estimateProjectArea, estimateRoomProgramArea, ROOM_TYPE_DEFINITIONS, type CorridorPolicy, type ProjectBrief, type ProjectEntrance, type RoomProgram, type RoomType, type WcKind } from './roomTypes';
 
 export interface PlacedRoom {
   id: string;
   programId: string;
   type: RoomType;
+  wcKind?: WcKind;
   name: string;
   x: number;
   y: number;
@@ -110,7 +111,8 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
         id: `${plan.program.id}-${rooms.length + 1}`,
         programId: plan.program.id,
         type: plan.program.type,
-        name: definition.name,
+        wcKind: plan.program.wcKind,
+        name: roomName(plan.program),
         x: verticalCorridor ? (sideIndex === 0 ? corridor.x - width : corridor.x + corridor.w) : roundToGrid(cursor),
         y: verticalCorridor ? roundToGrid(cursor) : (sideIndex === 0 ? corridor.y - depth : corridor.y + corridor.d),
         w: width,
@@ -273,6 +275,13 @@ function sideFromEntrance(entrance: ProjectEntrance): NonNullable<FloorLayoutOpt
 
 function corridorLabel(side: NonNullable<FloorLayoutOptions['corridorSide']>): string {
   return ({ south: 'spodaj', north: 'zgoraj', west: 'levo', east: 'desno' })[side];
+}
+
+function roomName(program: RoomProgram): string {
+  if (program.type !== 'wc') return ROOM_TYPE_DEFINITIONS[program.type].name;
+  if (program.wcKind === 'male') return 'Moški WC';
+  if (program.wcKind === 'female') return 'Ženski WC';
+  return 'Unisex WC';
 }
 
 function resolveBoundary(brief: ProjectBrief): FloorLayout['boundary'] {

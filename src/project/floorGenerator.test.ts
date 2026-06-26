@@ -78,6 +78,22 @@ describe('project floor generator', () => {
     expect(Math.max(...wcIndexes) - Math.min(...wcIndexes)).toBeGreaterThan(4);
   });
 
+  it('keeps male and female wc programs as separate placed rooms', () => {
+    const layout = generateStripFloorLayout({
+      ...brief,
+      rooms: [
+        { id: 'wc-men', type: 'wc', wcKind: 'male', count: 1 },
+        { id: 'wc-women', type: 'wc', wcKind: 'female', count: 1 },
+        { id: 'office', type: 'office', count: 1, workstations: 1 },
+        { id: 'corridor', type: 'corridor', count: 1 },
+      ],
+    });
+    expect(layout.rooms.filter((room) => room.type === 'wc').map((room) => [room.name, room.wcKind])).toEqual([
+      ['Moški WC', 'male'],
+      ['Ženski WC', 'female'],
+    ]);
+  });
+
   it('routes the main corridor from the first floor entrance and keeps all entrances', () => {
     const layout = generateStripFloorLayout({
       ...brief,

@@ -26,7 +26,7 @@ describe('IFC text importer', () => {
   it('normalizes IFC spaces and corridor quantities', () => {
     const plan = parseIfcTextToNormalizedPlan(fixture, 'fixture');
     expect(plan.rooms).toHaveLength(1);
-    expect(plan.rooms[0]).toMatchObject({ name: 'WC Herren', roomType: 'wc' });
+    expect(plan.rooms[0]).toMatchObject({ name: 'WC Herren', roomType: 'wc', wcKind: 'male' });
     expect(plan.rooms[0].w).toBeCloseTo(4400, -2);
     expect(plan.rooms[0].d).toBeCloseTo(2900, -2);
     expect(plan.corridors).toEqual([{ sourceId: '40', name: 'Flur Ost', role: 'main', width: 3000 }]);

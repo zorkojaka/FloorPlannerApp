@@ -1,4 +1,4 @@
-import type { RoomType } from '../project/roomTypes';
+import type { RoomType, WcKind } from '../project/roomTypes';
 
 export type Facing = 'N' | 'E' | 'S' | 'W';
 
@@ -18,6 +18,7 @@ export interface NormalizedIfcRoom {
   sourceId: string;
   name: string;
   roomType: RoomType;
+  wcKind?: WcKind;
   w: number;
   d: number;
   elements: NormalizedIfcElement[];

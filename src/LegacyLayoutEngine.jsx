@@ -127,7 +127,8 @@ const DEFAULT_PROJECT = {
   entrances:[{id:"entry-1",wall:"S",position:0.5,width:1.2}],
   corridorPolicy:{minWidth:1.2,mainWidth:1.8,sideWidth:1.2},
   rooms:[
-    {id:"wc",type:"wc",count:1},
+    {id:"wc-men",type:"wc",wcKind:"male",count:1},
+    {id:"wc-women",type:"wc",wcKind:"female",count:1},
     {id:"office",type:"office",count:2,workstations:1},
     {id:"corridor",type:"corridor",count:1}
   ]
@@ -141,6 +142,15 @@ function ProjectWorkflow({onContinue}){
   const [selectedRoomId,setSelectedRoomId]=usePersistentState("floorplanner.project.selectedRoomId",null);
   const updateBoundary=(patch)=>setBrief(b=>({...b,boundary:{...b.boundary,...patch}}));
   const updateRoom=(type,patch)=>setBrief(b=>({...b,rooms:b.rooms.map(r=>r.type===type?{...r,...patch}:r)}));
+  const upsertRoom=(id,type,patch)=>setBrief(b=>{
+    const rooms=b.rooms||[];
+    const exists=rooms.some(r=>r.id===id);
+    return {...b,rooms:exists?rooms.map(r=>r.id===id?{...r,...patch}:r):[...rooms,{id,type,count:0,...patch}]};
+  });
+  const projectRoom=(id,type,wcKind)=>{
+    const rooms=brief.rooms||[];
+    return rooms.find(r=>r.id===id)||rooms.find(r=>r.type===type&&r.wcKind===wcKind)||rooms.find(r=>type==="wc"&&wcKind==="unisex"&&r.type==="wc"&&!r.wcKind)||{id,type,wcKind,count:0};
+  };
   const corridorPolicy=brief.corridorPolicy||{minWidth:1.2,mainWidth:1.8,sideWidth:1.2};
   const updateCorridorPolicy=(patch)=>setBrief(b=>{
     const next={...(b.corridorPolicy||corridorPolicy),...patch};
@@ -167,6 +177,9 @@ function ProjectWorkflow({onContinue}){
   const equalFloor=()=>setPairIndex(i=>i+1);
   const summary=estimateProjectArea(brief);
   const selectedRoom=champion?.rooms.find(r=>r.id===selectedRoomId)||champion?.rooms[0];
+  const maleWc=projectRoom("wc-men","wc","male");
+  const femaleWc=projectRoom("wc-women","wc","female");
+  const unisexWc=projectRoom("wc-unisex","wc","unisex");
   return <div className="phaseBody">
     <div className="phaseLead">Projekt — najprej razporedimo sobe in hodnike v dano kvadraturo. To je vmesni A/B korak: izbereš boljši tloris etaže, sistem pa se uči preference pred notranjo razporeditvijo sob.</div>
     <div className="projectGrid">
@@ -197,7 +210,9 @@ function ProjectWorkflow({onContinue}){
         </div>
         {strategyProfile&&<div className="softNote">Aktiven profil: <b>{strategyProfile.name}</b> · cluster {Math.round(strategyProfile.preferClusteredWc*100)} · spread {Math.round(strategyProfile.preferSpreadWc*100)} · križni hodniki {Math.round(strategyProfile.preferInternalCorridors*100)}</div>}
         <div className="eyebrow mt">Program sob</div>
-        <ProjectNum label="WC" unit="" v={brief.rooms.find(r=>r.type==="wc")?.count??0} set={v=>updateRoom("wc",{count:Math.round(v)})} min={0} max={8} step={1}/>
+        <ProjectNum label="Moški WC" unit="" v={maleWc.count??0} set={v=>upsertRoom(maleWc.id,"wc",{wcKind:"male",count:Math.round(v)})} min={0} max={8} step={1}/>
+        <ProjectNum label="Ženski WC" unit="" v={femaleWc.count??0} set={v=>upsertRoom(femaleWc.id,"wc",{wcKind:"female",count:Math.round(v)})} min={0} max={8} step={1}/>
+        <ProjectNum label="Unisex WC" unit="" v={unisexWc.count??0} set={v=>upsertRoom(unisexWc.id,"wc",{wcKind:"unisex",count:Math.round(v)})} min={0} max={8} step={1}/>
         <ProjectNum label="Pisarne" unit="" v={brief.rooms.find(r=>r.type==="office")?.count??0} set={v=>updateRoom("office",{count:Math.round(v)})} min={0} max={20} step={1}/>
         <ProjectNum label="Mest / pisarno" unit="" v={brief.rooms.find(r=>r.type==="office")?.workstations??1} set={v=>updateRoom("office",{workstations:Math.round(v)})} min={1} max={8} step={1}/>
         <div className="metricStack">

@@ -15,6 +15,7 @@ describe('project room type model', () => {
 
   it('estimates office and wc area before floor generation exists', () => {
     expect(estimateRoomProgramArea({ id: 'wc', type: 'wc', count: 1 })).toBe(3.2);
+    expect(estimateRoomProgramArea({ id: 'wc-men', type: 'wc', wcKind: 'male', count: 1 })).toBe(3.8);
     expect(estimateRoomProgramArea({ id: 'office', type: 'office', count: 2, workstations: 1 })).toBe(20);
   });
 

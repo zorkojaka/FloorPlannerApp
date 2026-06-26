@@ -1,4 +1,5 @@
 export type RoomType = 'wc' | 'office' | 'corridor';
+export type WcKind = 'male' | 'female' | 'unisex';
 
 export interface RoomTypeDefinition {
   type: RoomType;
@@ -16,6 +17,7 @@ export interface RoomProgram {
   id: string;
   type: RoomType;
   count: number;
+  wcKind?: WcKind;
   workstations?: number;
   areaOverride?: number;
 }
@@ -120,6 +122,7 @@ export function estimateRoomProgramArea(room: RoomProgram): number {
   if (!definition || room.count <= 0) return 0;
   if (room.type === 'corridor') return 0;
   if (room.areaOverride) return room.areaOverride * room.count;
+  if (room.type === 'wc' && room.wcKind === 'male') return 3.8 * room.count;
   if (room.type === 'office') {
     const workstations = Math.max(1, room.workstations ?? 1);
     return Math.max(definition.minArea, definition.preferredArea * workstations) * room.count;
