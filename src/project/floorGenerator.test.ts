@@ -92,6 +92,7 @@ describe('project floor generator', () => {
       ['Moški WC', 'male'],
       ['Ženski WC', 'female'],
     ]);
+    expect(layout.rooms.filter((room) => room.type === 'wc').every((room) => room.w >= 2.4 || room.d >= 2.4)).toBe(true);
   });
 
   it('routes the main corridor from the first floor entrance and keeps all entrances', () => {

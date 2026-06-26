@@ -202,7 +202,8 @@ interface RoomPlan {
 
 function minimumFrontageForProgram(program: RoomProgram, targetArea: number, maxDepth: number): number {
   const definition = ROOM_TYPE_DEFINITIONS[program.type];
-  return roundToGrid(Math.max(definition.minWidth, targetArea / Math.max(maxDepth, definition.minDepth, 0.1)));
+  const minWidth = program.type === 'wc' && (program.wcKind === 'male' || program.wcKind === 'female') ? 2.4 : definition.minWidth;
+  return roundToGrid(Math.max(minWidth, targetArea / Math.max(maxDepth, definition.minDepth, 0.1)));
 }
 
 function corridorWidthVariants(brief: ProjectBrief): number[] {

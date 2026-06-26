@@ -12,7 +12,9 @@ describe('project training from IFC summaries', () => {
     expect(training.brief.rooms.find((room) => room.id === 'office')).toMatchObject({ type: 'office', count: 61 });
     expect(training.brief.corridorPolicy?.mainWidth).toBe(2);
     expect(training.profile.mainCorridorWidth).toBeGreaterThanOrEqual(2000);
-    expect(generateFloorLayoutPool(training.brief).some((layout) => layout.warnings.length === 0)).toBe(true);
+    const pool = generateFloorLayoutPool(training.brief);
+    expect(pool.some((layout) => layout.warnings.length === 0)).toBe(true);
+    expect(pool[0].rooms.filter((room) => room.wcKind === 'male' || room.wcKind === 'female').every((room) => room.w >= 2.4 || room.d >= 2.4)).toBe(true);
   });
 
   it('turns the FZK Haus IFC summary into a smaller project brief', () => {
