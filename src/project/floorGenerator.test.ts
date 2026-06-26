@@ -40,4 +40,19 @@ describe('project floor generator', () => {
     expect(new Set(pool.map((layout) => layout.id)).size).toBe(pool.length);
     expect(pool.some((layout) => layout.corridor.y > 0)).toBe(true);
   });
+
+  it('routes the main corridor from the first floor entrance and keeps all entrances', () => {
+    const layout = generateStripFloorLayout({
+      ...brief,
+      entrances: [
+        { id: 'west-main', wall: 'W', position: 0.5, width: 1.4 },
+        { id: 'east-service', wall: 'E', position: 0.2, width: 1.1 },
+        { id: 'south-extra', wall: 'S', position: 0.8, width: 1.0 },
+      ],
+    });
+    expect(layout.corridor.x).toBe(0);
+    expect(layout.corridor.w).toBe(1.4);
+    expect(layout.corridor.d).toBe(8);
+    expect(layout.entrances.map((entry) => entry.id)).toEqual(['west-main', 'east-service', 'south-extra']);
+  });
 });

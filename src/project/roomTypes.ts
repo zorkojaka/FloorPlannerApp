@@ -26,10 +26,18 @@ export interface ProjectBoundary {
   depth?: number;
 }
 
+export interface ProjectEntrance {
+  id: string;
+  wall: 'N' | 'E' | 'S' | 'W';
+  position: number;
+  width: number;
+}
+
 export interface ProjectBrief {
   id: string;
   name: string;
   boundary: ProjectBoundary;
+  entrances?: ProjectEntrance[];
   rooms: RoomProgram[];
 }
 
@@ -80,6 +88,11 @@ export const ROOM_TYPE_DEFINITIONS: Record<RoomType, RoomTypeDefinition> = {
 export function validateProjectBrief(brief: ProjectBrief): string[] {
   const errors: string[] = [];
   if (!Number.isFinite(brief.boundary.area) || brief.boundary.area <= 0) errors.push('Project boundary area must be positive.');
+  for (const entrance of brief.entrances || []) {
+    if (!['N', 'E', 'S', 'W'].includes(entrance.wall)) errors.push(`Entrance ${entrance.id} has unsupported wall.`);
+    if (!Number.isFinite(entrance.position) || entrance.position < 0 || entrance.position > 1) errors.push(`Entrance ${entrance.id} position must be between 0 and 1.`);
+    if (!Number.isFinite(entrance.width) || entrance.width <= 0) errors.push(`Entrance ${entrance.id} width must be positive.`);
+  }
   for (const room of brief.rooms) {
     if (!ROOM_TYPE_DEFINITIONS[room.type]) errors.push(`Unsupported room type: ${room.type}`);
     if (!Number.isInteger(room.count) || room.count < 0) errors.push(`Room ${room.id} count must be a non-negative integer.`);

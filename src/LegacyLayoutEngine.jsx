@@ -123,6 +123,7 @@ const DEFAULT_PROJECT = {
   id:"demo-project",
   name:"Demo etaža",
   boundary:{area:80,width:10,depth:8},
+  entrances:[{id:"entry-1",wall:"S",position:0.5,width:1.2}],
   rooms:[
     {id:"wc",type:"wc",count:1},
     {id:"office",type:"office",count:2,workstations:1},
@@ -137,6 +138,10 @@ function ProjectWorkflow({onContinue}){
   const [selectedRoomId,setSelectedRoomId]=usePersistentState("floorplanner.project.selectedRoomId",null);
   const updateBoundary=(patch)=>setBrief(b=>({...b,boundary:{...b.boundary,...patch}}));
   const updateRoom=(type,patch)=>setBrief(b=>({...b,rooms:b.rooms.map(r=>r.type===type?{...r,...patch}:r)}));
+  const entrances=brief.entrances?.length?brief.entrances:[{id:"entry-1",wall:"S",position:0.5,width:1.2}];
+  const setEntrance=(id,patch)=>setBrief(b=>({...b,entrances:entrances.map(e=>e.id===id?{...e,...patch}:e)}));
+  const addEntrance=()=>setBrief(b=>({...b,entrances:[...entrances,{id:uid(),wall:"S",position:0.5,width:1.2}]}));
+  const removeEntrance=(id)=>setBrief(b=>({...b,entrances:entrances.filter(e=>e.id!==id)}));
   const pool=useMemo(()=>generateFloorLayoutPool(brief),[brief]);
   const ranked=useMemo(()=>rankFloorLayouts(pool,pref.weights),[pool,pref.weights]);
   const champion=ranked.find(l=>l.id===pref.championId)||ranked[0];
@@ -159,6 +164,16 @@ function ProjectWorkflow({onContinue}){
         <Num label="Površina m²" v={brief.boundary.area} set={v=>updateBoundary({area:v})} min={20} max={500} step={5}/>
         <Num label="Širina m" v={brief.boundary.width} set={v=>updateBoundary({width:v})} min={4} max={40} step={0.5}/>
         <Num label="Globina m" v={brief.boundary.depth} set={v=>updateBoundary({depth:v})} min={4} max={40} step={0.5}/>
+        <div className="eyebrow mt">Glavni vhodi</div>
+        <div className="entranceList">
+          {entrances.map((entry,i)=><div key={entry.id} className="entranceItem">
+            <div className="zTop"><span>vhod {i+1}</span><button onClick={()=>removeEntrance(entry.id)} disabled={entrances.length<=1}>×</button></div>
+            <div className="dRow"><span>zid</span><div className="rt3 wrap">{[["N","S"],["E","V"],["S","J"],["W","Z"]].map(([v,l])=><button key={v} className={entry.wall===v?"on":""} onClick={()=>setEntrance(entry.id,{wall:v})}>{l}</button>)}</div></div>
+            <Num label="Pozicija %" v={Math.round((entry.position??0.5)*100)} set={v=>setEntrance(entry.id,{position:clamp(v/100,0,1)})} min={0} max={100} step={5}/>
+            <Num label="Širina m" v={entry.width??1.2} set={v=>setEntrance(entry.id,{width:v})} min={0.8} max={3} step={0.1}/>
+          </div>)}
+        </div>
+        <button className="add" onClick={addEntrance}>+ vhod</button>
         <div className="eyebrow mt">Program sob</div>
         <Num label="WC" v={brief.rooms.find(r=>r.type==="wc")?.count??0} set={v=>updateRoom("wc",{count:Math.round(v)})} min={0} max={8} step={1}/>
         <Num label="Pisarne" v={brief.rooms.find(r=>r.type==="office")?.count??0} set={v=>updateRoom("office",{count:Math.round(v)})} min={0} max={20} step={1}/>
@@ -223,7 +238,20 @@ function FloorSvg({layout}){
       <text x={pad+r.x+r.w/2} y={pad+r.y+r.d/2} textAnchor="middle" dominantBaseline="middle" fontSize="0.32" fill="#10161b">{r.name}</text>
       {r.doorToCorridor&&<rect x={pad+r.x+r.w/2-0.35} y={pad+r.y-0.04} width="0.7" height="0.08" fill="#e2553f"/>}
     </g>)}
+    {(layout.entrances||[]).map(e=><EntranceMark key={e.id} entry={e} pad={pad} W={W} D={D}/>)}
   </svg>;
+}
+
+function EntranceMark({entry,pad,W,D}){
+  const width=Math.min(entry.width||1.2,entry.wall==="N"||entry.wall==="S"?W:D);
+  const pos=clamp(entry.position??0.5,0,1);
+  const horizontal=entry.wall==="N"||entry.wall==="S";
+  const x=entry.wall==="W"?pad-0.08:entry.wall==="E"?pad+W-0.02:pad+pos*W-width/2;
+  const y=entry.wall==="S"?pad-0.08:entry.wall==="N"?pad+D-0.02:pad+pos*D-width/2;
+  return <g>
+    <rect x={x} y={y} width={horizontal?width:0.1} height={horizontal?0.1:width} fill="#e2553f"/>
+    <circle cx={horizontal?x+width/2:x+0.05} cy={horizontal?y+0.05:y+width/2} r="0.18" fill="#e2553f"/>
+  </g>;
 }
 
 function FloorSignals({layout}){
@@ -1496,6 +1524,7 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .floorSignals .bad,.metricStack .bad{color:#f08a78;border-color:#7a3028}.metricStack .ok{color:#7fdede;border-color:#1f4444}
 .metricStack{display:grid;gap:6px;font-size:10.5px;color:var(--mut);margin-top:10px}.floorBtns{margin:0;grid-template-columns:1fr 1fr 1fr auto}
 .roomPick{display:grid;gap:6px;margin-top:8px}.roomPick button{display:flex;justify-content:space-between;gap:8px;align-items:center;text-align:left;background:var(--p2);border:1px solid var(--bd);color:var(--tx);border-radius:7px;padding:8px 9px;cursor:pointer}.roomPick button.on{border-color:var(--cy);background:#0e2626}.roomPick span{color:var(--mut);font-size:10px}
+.entranceList{display:grid;gap:7px;margin-bottom:8px}.entranceItem{background:var(--p2);border:1px solid var(--bd);border-radius:8px;padding:8px 9px}.entranceItem .num{margin-bottom:8px}.entranceItem .zTop button:disabled{opacity:.35;cursor:not-allowed}
 @media(max-width:1180px){.projectGrid{grid-template-columns:1fr}.floorPair{grid-template-columns:1fr}.floorBtns{grid-template-columns:1fr}}
 /* zložljive sekcije desnega stolpca */
 .sec{border-top:1px solid var(--bd)}.sec:first-child{border-top:none}

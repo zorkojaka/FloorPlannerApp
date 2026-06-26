@@ -300,5 +300,6 @@ Implementirati fazo 1: model projekta, tipe sob in osnovno oceno kvadrature.
 - Dodana ocena kvadrature programa.
 - Dodan prvi deterministicen strip generator etaže: hodnik + sobe ob hodniku.
 - Dodan vmesni A/B izbor kandidatov etaže.
+- Projektni nivo podpira več glavnih vhodov v etažo; prvi vhod določa glavno smer hodnika, vsi vhodi so izrisani na tlorisu.
 - Dodani osnovni pisarniški elementi: pisalna miza, pisarniški stol, omara.
 - Dodan `NormalizedIfcPlan` fixture format in pretvorba v induction observations.
