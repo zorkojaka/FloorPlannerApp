@@ -14,6 +14,8 @@ export interface PlacedRoom {
 }
 
 export interface FloorLayout {
+  id: string;
+  variant: string;
   boundary: {
     area: number;
     width: number;
@@ -26,7 +28,18 @@ export interface FloorLayout {
   warnings: string[];
 }
 
-export function generateStripFloorLayout(brief: ProjectBrief, corridorWidth = 1.4): FloorLayout {
+export interface FloorLayoutOptions {
+  id?: string;
+  corridorWidth?: number;
+  corridorSide?: 'north' | 'south';
+  roomOrder?: 'program' | 'reverse' | 'offices-first' | 'wc-first';
+}
+
+export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayoutOptions | number = {}): FloorLayout {
+  const opts: FloorLayoutOptions = typeof options === 'number' ? { corridorWidth: options } : options;
+  const corridorWidth = opts.corridorWidth ?? 1.4;
+  const corridorSide = opts.corridorSide ?? 'south';
+  const roomOrder = opts.roomOrder ?? 'program';
   const boundary = resolveBoundary(brief);
   const warnings: string[] = [];
   const summary = estimateProjectArea(brief);
@@ -39,7 +52,7 @@ export function generateStripFloorLayout(brief: ProjectBrief, corridorWidth = 1.
     type: 'corridor',
     name: ROOM_TYPE_DEFINITIONS.corridor.name,
     x: 0,
-    y: 0,
+    y: corridorSide === 'south' ? 0 : boundary.depth - corridorWidth,
     w: boundary.width,
     d: corridorWidth,
     area: boundary.width * corridorWidth,
@@ -50,7 +63,7 @@ export function generateStripFloorLayout(brief: ProjectBrief, corridorWidth = 1.
   const rooms: PlacedRoom[] = [];
   let cursorX = 0;
 
-  for (const program of expandPrograms(brief.rooms)) {
+  for (const program of orderPrograms(expandPrograms(brief.rooms), roomOrder)) {
     const definition = ROOM_TYPE_DEFINITIONS[program.type];
     if (!definition || program.type === 'corridor') continue;
     const targetArea = estimateRoomProgramArea({ ...program, count: 1 });
@@ -65,7 +78,7 @@ export function generateStripFloorLayout(brief: ProjectBrief, corridorWidth = 1.
       type: program.type,
       name: definition.name,
       x: roundToGrid(cursorX),
-      y: corridorWidth,
+      y: corridorSide === 'south' ? corridorWidth : 0,
       w: width,
       d: depth,
       area,
@@ -78,6 +91,8 @@ export function generateStripFloorLayout(brief: ProjectBrief, corridorWidth = 1.
   const usedArea = corridor.area + rooms.reduce((sum, room) => sum + room.area, 0);
 
   return {
+    id: opts.id ?? `${roomOrder}-${corridorSide}-${corridorWidth}`,
+    variant: `${roomOrder} · hodnik ${corridorSide === 'south' ? 'spodaj' : 'zgoraj'} · ${corridorWidth.toFixed(1)} m`,
     boundary,
     rooms,
     corridor,
@@ -85,6 +100,24 @@ export function generateStripFloorLayout(brief: ProjectBrief, corridorWidth = 1.
     remainingArea: roundToGrid(boundary.area - usedArea),
     warnings,
   };
+}
+
+export function generateFloorLayoutPool(brief: ProjectBrief): FloorLayout[] {
+  const variants: FloorLayoutOptions[] = [];
+  for (const corridorSide of ['south', 'north'] as const) {
+    for (const roomOrder of ['program', 'reverse', 'offices-first', 'wc-first'] as const) {
+      for (const corridorWidth of [1.2, 1.4, 1.8]) {
+        variants.push({ corridorSide, roomOrder, corridorWidth, id: `${corridorSide}-${roomOrder}-${corridorWidth}` });
+      }
+    }
+  }
+  const unique = new Map<string, FloorLayout>();
+  for (const variant of variants) {
+    const layout = generateStripFloorLayout(brief, variant);
+    const key = layout.rooms.map((room) => `${room.type}:${room.x}:${room.y}:${room.w}:${room.d}`).join('|') + `|${layout.corridor.y}:${layout.corridor.d}`;
+    if (!unique.has(key)) unique.set(key, layout);
+  }
+  return [...unique.values()];
 }
 
 function resolveBoundary(brief: ProjectBrief): FloorLayout['boundary'] {
@@ -105,6 +138,14 @@ function expandPrograms(programs: RoomProgram[]): RoomProgram[] {
       count: 1,
     })),
   );
+}
+
+function orderPrograms(programs: RoomProgram[], order: FloorLayoutOptions['roomOrder']): RoomProgram[] {
+  const nonCorridors = programs.filter((program) => program.type !== 'corridor');
+  if (order === 'reverse') return [...nonCorridors].reverse();
+  if (order === 'offices-first') return [...nonCorridors].sort((a, b) => Number(b.type === 'office') - Number(a.type === 'office'));
+  if (order === 'wc-first') return [...nonCorridors].sort((a, b) => Number(b.type === 'wc') - Number(a.type === 'wc'));
+  return nonCorridors;
 }
 
 function roundToGrid(value: number, grid = 0.1): number {

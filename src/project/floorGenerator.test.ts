@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { generateStripFloorLayout } from './floorGenerator';
+import { generateFloorLayoutPool, generateStripFloorLayout } from './floorGenerator';
 import type { ProjectBrief } from './roomTypes';
 
 describe('project floor generator', () => {
@@ -32,5 +32,12 @@ describe('project floor generator', () => {
     });
     expect(layout.fitsBoundary).toBe(false);
     expect(layout.warnings).toContain('Rooms exceed available frontage along the corridor.');
+  });
+
+  it('generates multiple deterministic floor candidates for A/B selection', () => {
+    const pool = generateFloorLayoutPool(brief);
+    expect(pool.length).toBeGreaterThan(4);
+    expect(new Set(pool.map((layout) => layout.id)).size).toBe(pool.length);
+    expect(pool.some((layout) => layout.corridor.y > 0)).toBe(true);
   });
 });

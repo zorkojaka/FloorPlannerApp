@@ -1,0 +1,29 @@
+{
+  "sourceId": "fixture-demo-001",
+  "name": "Normalized WC and office demo",
+  "rooms": [
+    {
+      "sourceId": "space-wc-01",
+      "name": "WC 01",
+      "roomType": "wc",
+      "w": 1800,
+      "d": 2200,
+      "elements": [
+        { "sourceId": "toilet-01", "name": "Toilet", "elementKey": "toilet", "x": 700, "y": 250, "w": 400, "d": 600, "facing": "N" },
+        { "sourceId": "sink-01", "name": "Sink", "elementKey": "sink", "x": 100, "y": 900, "w": 550, "d": 430, "facing": "E" }
+      ]
+    },
+    {
+      "sourceId": "space-office-01",
+      "name": "Office 01",
+      "roomType": "office",
+      "w": 3600,
+      "d": 3200,
+      "elements": [
+        { "sourceId": "desk-01", "name": "Desk", "elementKey": "desk", "x": 900, "y": 300, "w": 1400, "d": 700, "facing": "N" },
+        { "sourceId": "chair-01", "name": "Chair", "elementKey": "chair", "x": 1300, "y": 1150, "w": 600, "d": 600, "facing": "N" },
+        { "sourceId": "cabinet-01", "name": "Cabinet", "elementKey": "cabinet", "x": 2600, "y": 200, "w": 900, "d": 450, "facing": "S" }
+      ]
+    }
+  ]
+}

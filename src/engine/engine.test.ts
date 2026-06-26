@@ -264,6 +264,29 @@ describe('MVP metrics', () => {
 
     expect(measurePreferenceGain(state)).toBeGreaterThan(0);
   });
+
+  it('generates a basic office room with desk, chair and cabinet', () => {
+    const library = baseLib();
+    const pool = generateLayoutPool({
+      library,
+      program: [
+        { id: 'door', key: 'door', w: 800, dir: 'auto', wall: 'auto', hinge: 'auto' },
+        { id: 'desk', key: 'desk' },
+        { id: 'chair', key: 'chair' },
+        { id: 'cabinet', key: 'cabinet' },
+      ],
+      cfg: { W: 3600, D: 3200, wetWall: 'S', minAisle: 800 },
+      soft: true,
+      samples: 500,
+      limit: 80,
+      minPathWidth: 650,
+    });
+    expect(pool.length).toBeGreaterThan(0);
+    const names = pool[0].placed.map((item) => item.name);
+    expect(names).toContain('Pisalna miza');
+    expect(names).toContain('Pisarniški stol');
+    expect(names).toContain('Omara');
+  });
 });
 
 describe('JSON storage', () => {

@@ -19,6 +19,9 @@ import { applyInducedRules, induceRules, parseReferenceJson } from "./rules/indu
 import { clamp, uid } from "./shared/math";
 import { loadJson, saveJson } from "./shared/storage";
 import { ACCESSIBLE_BATHROOM_REFS, CLASSIC_BATHROOM_REFS } from "./training/classicBathroomRefs";
+import { generateFloorLayoutPool } from "./project/floorGenerator";
+import { estimateProjectArea } from "./project/roomTypes";
+import { floorSignals, initialFloorPreferenceState, rankFloorLayouts, recordFloorPreference, scoreFloorLayout } from "./project/floorPreference";
 
 /* =========================================================================
    ZAKLENJEN SISTEM - harmonika orehov
@@ -55,7 +58,7 @@ export default function App(){
 
 /* ===================== WORKFLOW (uporabniški pogled) ===================== */
 function Workflow({library,setLibrary}){
-  const [phase,setPhase]=usePersistentState("floorplanner.phase","korak2");
+  const [phase,setPhase]=usePersistentState("floorplanner.phase","projekt");
   const [setupLeftPct,setSetupLeftPct]=usePersistentState("floorplanner.setupLeftPct",42);
   const setupGridRef=useRef(null);
   const rp=useRoomProject(library);
@@ -79,6 +82,7 @@ function Workflow({library,setLibrary}){
   };
   const phases=[
     {id:"faza0",tag:"0",title:"Šolanje",sub:"indukcija — napolni lečo znanja (občasno)"},
+    {id:"projekt",tag:"P",title:"Projekt",sub:"sobe + hodniki — A/B izbor etaže"},
     {id:"korak1",tag:"1",title:"Elementi",sub:"knjižnica — priklopi, dimenzije, uporaba"},
     {id:"korak2",tag:"2",title:"Omejitve sobe",sub:"velikost, vrata, cone, fiksni elementi"},
     {id:"korak3",tag:"3",title:"Generiranje in izbiranje",sub:"variacije + A/B aktivno učenje"},
@@ -93,6 +97,7 @@ function Workflow({library,setLibrary}){
       ))}
     </div>
     {phase==="faza0" && <div className="phaseBody"><div className="phaseLead">Faza 0 — šolanje: vržeš noter primere dobre prakse, sistem izlušči znanje (envelope, prior kanalov). Zgodi se enkrat/občasno, ne pri vsakem projektu.</div><O9 library={library} setLibrary={setLibrary}/></div>}
+    {phase==="projekt" && <ProjectWorkflow onContinue={()=>setPhase("korak2")}/>}
     {phase==="korak1" && <div className="phaseBody"><O1 library={library} setLibrary={setLibrary}/></div>}
     {phase==="korak2" && <div className="phaseBody">
       <div className="phaseLead">Korak 2 — omejitve sobe: »tako je«. Velikost, vrata, prepovedane cone, fiksni elementi. Ta nabor je vmesnik, ki ga kasneje napolni engine za razporeditev sob.</div>
@@ -112,6 +117,116 @@ function Workflow({library,setLibrary}){
     </div>}
   </div>;
 }
+
+const DEFAULT_PROJECT = {
+  id:"demo-project",
+  name:"Demo etaža",
+  boundary:{area:80,width:10,depth:8},
+  rooms:[
+    {id:"wc",type:"wc",count:1},
+    {id:"office",type:"office",count:2,workstations:1},
+    {id:"corridor",type:"corridor",count:1}
+  ]
+};
+
+function ProjectWorkflow({onContinue}){
+  const [brief,setBrief]=usePersistentState("floorplanner.project.brief",DEFAULT_PROJECT);
+  const [pref,setPref]=usePersistentState("floorplanner.project.preference",initialFloorPreferenceState);
+  const [pairIndex,setPairIndex]=usePersistentState("floorplanner.project.pairIndex",0);
+  const updateBoundary=(patch)=>setBrief(b=>({...b,boundary:{...b.boundary,...patch}}));
+  const updateRoom=(type,patch)=>setBrief(b=>({...b,rooms:b.rooms.map(r=>r.type===type?{...r,...patch}:r)}));
+  const pool=useMemo(()=>generateFloorLayoutPool(brief),[brief]);
+  const ranked=useMemo(()=>rankFloorLayouts(pool,pref.weights),[pool,pref.weights]);
+  const champion=ranked.find(l=>l.id===pref.championId)||ranked[0];
+  const challengers=ranked.filter(l=>!champion||l.id!==champion.id);
+  const challenger=challengers[pairIndex%Math.max(1,challengers.length)]||ranked[1]||champion;
+  const pair=[champion,challenger].filter(Boolean);
+  const chooseFloor=(winner,loser)=>{
+    if(!winner||!loser) return;
+    setPref(p=>recordFloorPreference(p,winner,loser));
+    setPairIndex(i=>i+1);
+  };
+  const equalFloor=()=>setPairIndex(i=>i+1);
+  const summary=estimateProjectArea(brief);
+  return <div className="phaseBody">
+    <div className="phaseLead">Projekt — najprej razporedimo sobe in hodnike v dano kvadraturo. To je vmesni A/B korak: izbereš boljši tloris etaže, sistem pa se uči preference pred notranjo razporeditvijo sob.</div>
+    <div className="projectGrid">
+      <aside className="col projectInputs">
+        <div className="eyebrow">Okvir etaže</div>
+        <Num label="Površina m²" v={brief.boundary.area} set={v=>updateBoundary({area:v})} min={20} max={500} step={5}/>
+        <Num label="Širina m" v={brief.boundary.width} set={v=>updateBoundary({width:v})} min={4} max={40} step={0.5}/>
+        <Num label="Globina m" v={brief.boundary.depth} set={v=>updateBoundary({depth:v})} min={4} max={40} step={0.5}/>
+        <div className="eyebrow mt">Program sob</div>
+        <Num label="WC" v={brief.rooms.find(r=>r.type==="wc")?.count??0} set={v=>updateRoom("wc",{count:Math.round(v)})} min={0} max={8} step={1}/>
+        <Num label="Pisarne" v={brief.rooms.find(r=>r.type==="office")?.count??0} set={v=>updateRoom("office",{count:Math.round(v)})} min={0} max={20} step={1}/>
+        <Num label="Mest / pisarno" v={brief.rooms.find(r=>r.type==="office")?.workstations??1} set={v=>updateRoom("office",{workstations:Math.round(v)})} min={1} max={8} step={1}/>
+        <div className="metricStack">
+          <span>program <b>{summary.roomArea.toFixed(1)} m²</b></span>
+          <span>hodnik ocena <b>{summary.corridorArea.toFixed(1)} m²</b></span>
+          <span>skupaj <b>{summary.totalArea.toFixed(1)} m²</b></span>
+          <span className={summary.fitsBoundary?"ok":"bad"}>{summary.fitsBoundary?"gre v kvadraturo":"presega kvadraturo"} <b>{summary.remainingArea.toFixed(1)} m²</b></span>
+        </div>
+      </aside>
+      <main className="projectStage">
+        <div className="floorProgress">
+          <span>Kandidati <b className="mono">{pool.length}</b></span>
+          <span>Primerjave <b className="mono">{pref.comparisons}</b></span>
+          <span>Prvak <b className="mono">{champion?.id||"-"}</b></span>
+        </div>
+        <div className="floorBest">
+          <div className="floorHead"><b>Trenutno najboljša etaža</b><span>{champion?.variant}</span></div>
+          {champion&&<FloorSvg layout={champion}/>}
+        </div>
+        <div className="floorPair">
+          {pair.map((layout,i)=><div key={layout.id} className="floorCard">
+            <div className="floorHead"><b>{i===0?"A":"B"} · score {(scoreFloorLayout(layout,pref.weights)*100).toFixed(0)}</b><span>{layout.variant}</span></div>
+            <FloorSvg layout={layout}/>
+            <FloorSignals layout={layout}/>
+          </div>)}
+        </div>
+        <div className="abChoiceBtns floorBtns">
+          <button onClick={()=>chooseFloor(pair[0],pair[1])}>A je boljša</button>
+          <button onClick={equalFloor}>enakovredni</button>
+          <button onClick={()=>chooseFloor(pair[1],pair[0])}>B je boljša</button>
+          <button className="champStay" onClick={()=>{setPairIndex(i=>i+1)}}>trenutna ostane</button>
+        </div>
+      </main>
+      <aside className="col projectExplain">
+        <div className="eyebrow">Kaj se uči</div>
+        <div className="metricStack">
+          {Object.entries(pref.weights).map(([k,v])=><span key={k}>{floorWeightLabel(k)} <b>{Math.round(v*100)}</b></span>)}
+        </div>
+        <div className="softNote">To je isti princip kot A/B pri notranji postavitvi, samo da izbiraš razporeditev sob. Naslednji korak bo, da izbrani kandidat napolni posamezne sobe z opremo.</div>
+        <button className="regen" onClick={onContinue}>Naprej → notranjost izbrane sobe</button>
+      </aside>
+    </div>
+  </div>;
+}
+
+function FloorSvg({layout}){
+  const pad=22, W=layout.boundary.width, D=layout.boundary.depth;
+  const vb=`0 0 ${W+pad*2} ${D+pad*2}`;
+  const rooms=[layout.corridor,...layout.rooms];
+  return <svg className="floorSvg" viewBox={vb} role="img">
+    <rect x={pad} y={pad} width={W} height={D} fill="#f6f7f3" stroke="#2b3138" strokeWidth="0.04"/>
+    {rooms.map(r=><g key={r.id}>
+      <rect x={pad+r.x} y={pad+r.y} width={r.w} height={r.d} fill={roomColor(r.type)} stroke="#22313a" strokeWidth="0.035"/>
+      <text x={pad+r.x+r.w/2} y={pad+r.y+r.d/2} textAnchor="middle" dominantBaseline="middle" fontSize="0.32" fill="#10161b">{r.name}</text>
+      {r.doorToCorridor&&<rect x={pad+r.x+r.w/2-0.35} y={pad+r.y-0.04} width="0.7" height="0.08" fill="#e2553f"/>}
+    </g>)}
+  </svg>;
+}
+
+function FloorSignals({layout}){
+  const s=floorSignals(layout);
+  return <div className="floorSignals">
+    {Object.entries(s).map(([k,v])=><span key={k}>{floorWeightLabel(k)} <b>{Math.round(v*100)}</b></span>)}
+    {layout.warnings.map(w=><span key={w} className="bad">{w}</span>)}
+  </div>;
+}
+
+function roomColor(type){return type==="corridor"?"#d9c27a":type==="wc"?"#7fdede":"#9fc8f0";}
+function floorWeightLabel(key){return ({compactness:"izraba",corridorEfficiency:"hodnik",wetGrouping:"mokri sklop",officeFrontage:"pisarne/okna"})[key]||key;}
 
 /* ===================== OREHE (razvojni/testni pogled) ===================== */
 function Orehe({library,setLibrary}){
@@ -1338,6 +1453,7 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .lensTabs button.on{background:#0e2626;color:var(--cy)}
 .wf{display:flex;flex-direction:column;gap:10px}
 .phaseNav{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.phaseNav{grid-template-columns:repeat(5,1fr)}
 @media(max-width:760px){.phaseNav{grid-template-columns:1fr 1fr}}
 .phaseBtn{display:flex;align-items:center;gap:10px;text-align:left;background:var(--panel);border:1px solid var(--bd);border-radius:11px;padding:11px 13px;cursor:pointer;color:var(--tx)}
 .phaseBtn.on{border-color:var(--cy);background:#0e1f1f}
@@ -1357,6 +1473,16 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 @media(max-width:1180px){.grid2c.setupGrid,.grid2c.setupGrid.resizableSetup{grid-template-columns:1fr}.colResize{display:none}}
 .phaseCta{display:flex;justify-content:flex-end;padding:14px 18px;background:var(--panel)}
 .ctaNext{background:#0e2626;border:1px solid #1f4444;color:var(--cy);border-radius:8px;padding:9px 18px;font-size:12.5px;cursor:pointer}.ctaNext:hover{border-color:var(--cy)}
+.projectGrid{display:grid;grid-template-columns:260px 1fr 260px;gap:1px;background:var(--bd)}
+.projectStage{background:var(--bg);min-width:0;padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.floorProgress{display:flex;gap:10px;flex-wrap:wrap;color:var(--mut);font-size:11px}.floorProgress span{background:var(--panel);border:1px solid var(--bd);border-radius:7px;padding:7px 9px}
+.floorBest,.floorCard{background:var(--panel);border:1px solid var(--bd);border-radius:8px;overflow:hidden}
+.floorBest{max-width:640px}.floorHead{height:34px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 10px;border-bottom:1px solid var(--bd);font-size:12px}.floorHead span{color:var(--mut);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.floorPair{display:grid;grid-template-columns:1fr 1fr;gap:10px}.floorSvg{width:100%;height:250px;background:#f6f7f3;display:block}
+.floorSignals{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:9px;font-size:10.5px;color:var(--mut)}.floorSignals span,.metricStack span{background:var(--p2);border:1px solid var(--bd);border-radius:6px;padding:7px}.floorSignals b,.metricStack b{float:right;color:var(--cy)}
+.floorSignals .bad,.metricStack .bad{color:#f08a78;border-color:#7a3028}.metricStack .ok{color:#7fdede;border-color:#1f4444}
+.metricStack{display:grid;gap:6px;font-size:10.5px;color:var(--mut);margin-top:10px}.floorBtns{margin:0;grid-template-columns:1fr 1fr 1fr auto}
+@media(max-width:1180px){.projectGrid{grid-template-columns:1fr}.floorPair{grid-template-columns:1fr}.floorBtns{grid-template-columns:1fr}}
 /* zložljive sekcije desnega stolpca */
 .sec{border-top:1px solid var(--bd)}.sec:first-child{border-top:none}
 .secHd{width:100%;display:flex;align-items:center;gap:8px;background:none;border:none;color:var(--tx);cursor:pointer;text-align:left;padding:13px 0 11px}
