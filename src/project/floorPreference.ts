@@ -26,10 +26,11 @@ export function initialFloorPreferenceState(): FloorPreferenceState {
 
 export function scoreFloorLayout(layout: FloorLayout, weights: FloorPreferenceWeights = DEFAULT_FLOOR_WEIGHTS): number {
   const roomArea = layout.rooms.reduce((sum, room) => sum + room.area, 0);
-  const usedArea = roomArea + layout.corridor.area;
+  const corridorArea = layout.corridor.area + (layout.corridorLinks || []).reduce((sum, link) => sum + link.area, 0);
+  const usedArea = roomArea + corridorArea;
   const overflow = layout.warnings.length ? 0.45 : 1;
   const compactness = clamp01(usedArea / Math.max(layout.boundary.area, 1));
-  const corridorEfficiency = clamp01(1 - layout.corridor.area / Math.max(usedArea, 1));
+  const corridorEfficiency = clamp01(1 - corridorArea / Math.max(usedArea, 1));
   const wetGrouping = wetGroupingScore(layout);
   const officeFrontage = officeFrontageScore(layout);
   return overflow * (
@@ -62,10 +63,11 @@ export function recordFloorPreference(state: FloorPreferenceState, selected: Flo
 
 export function floorSignals(layout: FloorLayout): FloorPreferenceWeights {
   const roomArea = layout.rooms.reduce((sum, room) => sum + room.area, 0);
-  const usedArea = roomArea + layout.corridor.area;
+  const corridorArea = layout.corridor.area + (layout.corridorLinks || []).reduce((sum, link) => sum + link.area, 0);
+  const usedArea = roomArea + corridorArea;
   return {
     compactness: clamp01(usedArea / Math.max(layout.boundary.area, 1)),
-    corridorEfficiency: clamp01(1 - layout.corridor.area / Math.max(usedArea, 1)),
+    corridorEfficiency: clamp01(1 - corridorArea / Math.max(usedArea, 1)),
     wetGrouping: wetGroupingScore(layout),
     officeFrontage: officeFrontageScore(layout),
   };

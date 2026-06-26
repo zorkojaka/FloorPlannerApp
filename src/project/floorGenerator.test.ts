@@ -50,9 +50,11 @@ describe('project floor generator', () => {
         { id: 'south-extra', wall: 'S', position: 0.8, width: 1.0 },
       ],
     });
-    expect(layout.corridor.x).toBe(0);
+    expect(layout.corridor.x).toBeGreaterThan(0);
     expect(layout.corridor.w).toBe(1.4);
     expect(layout.corridor.d).toBe(8);
+    expect(layout.corridorLinks).toHaveLength(3);
+    expect(layout.corridorLinks.every((link) => link.type === 'corridor')).toBe(true);
     expect(layout.entrances.map((entry) => entry.id)).toEqual(['west-main', 'east-service', 'south-extra']);
   });
 });

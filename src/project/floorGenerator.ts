@@ -23,6 +23,7 @@ export interface FloorLayout {
   };
   rooms: PlacedRoom[];
   corridor: PlacedRoom;
+  corridorLinks: PlacedRoom[];
   entrances: ProjectEntrance[];
   fitsBoundary: boolean;
   remainingArea: number;
@@ -50,20 +51,30 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
   if (boundary.depth <= corridorWidth) warnings.push('Boundary depth is too small for corridor.');
 
   const verticalCorridor = corridorSide === 'west' || corridorSide === 'east';
+  const corridorCenter = verticalCorridor ? boundary.width / 2 : boundary.depth / 2;
   const corridor: PlacedRoom = {
     id: 'corridor-main',
     programId: 'corridor',
     type: 'corridor',
     name: ROOM_TYPE_DEFINITIONS.corridor.name,
-    x: corridorSide === 'east' ? boundary.width - corridorWidth : 0,
-    y: corridorSide === 'north' ? boundary.depth - corridorWidth : 0,
+    x: verticalCorridor ? roundToGrid(corridorCenter - corridorWidth / 2) : 0,
+    y: verticalCorridor ? 0 : roundToGrid(corridorCenter - corridorWidth / 2),
     w: verticalCorridor ? corridorWidth : boundary.width,
     d: verticalCorridor ? boundary.depth : corridorWidth,
     area: (verticalCorridor ? boundary.depth : boundary.width) * corridorWidth,
     doorToCorridor: false,
   };
+  const corridorLinks = buildEntranceLinks(entrances, boundary, corridor, corridorWidth);
 
-  const roomDepth = Math.max(0, verticalCorridor ? boundary.width - corridorWidth : boundary.depth - corridorWidth);
+  const roomSideStart = verticalCorridor
+    ? (corridor.x + corridor.w <= boundary.width / 2 ? corridor.x + corridor.w : 0)
+    : (corridor.y + corridor.d <= boundary.depth / 2 ? corridor.y + corridor.d : 0);
+  const roomDepth = Math.max(
+    0,
+    verticalCorridor
+      ? (roomSideStart === 0 ? corridor.x : boundary.width - corridor.x - corridor.w)
+      : (roomSideStart === 0 ? corridor.y : boundary.depth - corridor.y - corridor.d),
+  );
   const rooms: PlacedRoom[] = [];
   let cursor = 0;
 
@@ -81,8 +92,8 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
       programId: program.id,
       type: program.type,
       name: definition.name,
-      x: verticalCorridor ? (corridorSide === 'west' ? corridorWidth : 0) : roundToGrid(cursor),
-      y: verticalCorridor ? roundToGrid(cursor) : (corridorSide === 'south' ? corridorWidth : 0),
+      x: verticalCorridor ? roomSideStart : roundToGrid(cursor),
+      y: verticalCorridor ? roundToGrid(cursor) : roomSideStart,
       w: width,
       d: depth,
       area,
@@ -92,7 +103,7 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
   }
 
   if (cursor > (verticalCorridor ? boundary.depth : boundary.width)) warnings.push('Rooms exceed available frontage along the corridor.');
-  const usedArea = corridor.area + rooms.reduce((sum, room) => sum + room.area, 0);
+  const usedArea = corridor.area + corridorLinks.reduce((sum, link) => sum + link.area, 0) + rooms.reduce((sum, room) => sum + room.area, 0);
 
   return {
     id: opts.id ?? `${roomOrder}-${corridorSide}-${corridorWidth}`,
@@ -100,6 +111,7 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
     boundary,
     rooms,
     corridor,
+    corridorLinks,
     entrances,
     fitsBoundary: warnings.length === 0 && usedArea <= boundary.area,
     remainingArea: roundToGrid(boundary.area - usedArea),
@@ -120,10 +132,55 @@ export function generateFloorLayoutPool(brief: ProjectBrief): FloorLayout[] {
   const unique = new Map<string, FloorLayout>();
   for (const variant of variants) {
     const layout = generateStripFloorLayout(brief, variant);
-    const key = layout.rooms.map((room) => `${room.type}:${room.x}:${room.y}:${room.w}:${room.d}`).join('|') + `|${layout.corridor.x}:${layout.corridor.y}:${layout.corridor.w}:${layout.corridor.d}`;
+    const key = layout.rooms.map((room) => `${room.type}:${room.x}:${room.y}:${room.w}:${room.d}`).join('|') + `|${layout.corridor.x}:${layout.corridor.y}:${layout.corridor.w}:${layout.corridor.d}|${layout.corridorLinks.map((link) => `${link.x}:${link.y}:${link.w}:${link.d}`).join('|')}`;
     if (!unique.has(key)) unique.set(key, layout);
   }
   return [...unique.values()];
+}
+
+function buildEntranceLinks(
+  entrances: ProjectEntrance[],
+  boundary: FloorLayout['boundary'],
+  corridor: PlacedRoom,
+  corridorWidth: number,
+): PlacedRoom[] {
+  return entrances.map((entrance, index) => {
+    const point = entrancePoint(entrance, boundary);
+    const half = corridorWidth / 2;
+    if (entrance.wall === 'N' || entrance.wall === 'S') {
+      const targetY = entrance.wall === 'S' ? corridor.y : corridor.y + corridor.d;
+      const y = Math.min(point.y, targetY);
+      const d = Math.max(corridorWidth, Math.abs(point.y - targetY));
+      return corridorLink(index, point.x - half, y, corridorWidth, d);
+    }
+    const targetX = entrance.wall === 'W' ? corridor.x : corridor.x + corridor.w;
+    const x = Math.min(point.x, targetX);
+    const w = Math.max(corridorWidth, Math.abs(point.x - targetX));
+    return corridorLink(index, x, point.y - half, w, corridorWidth);
+  });
+}
+
+function entrancePoint(entrance: ProjectEntrance, boundary: FloorLayout['boundary']): { x: number; y: number } {
+  const pos = Math.max(0, Math.min(1, entrance.position));
+  if (entrance.wall === 'N') return { x: boundary.width * pos, y: boundary.depth };
+  if (entrance.wall === 'S') return { x: boundary.width * pos, y: 0 };
+  if (entrance.wall === 'E') return { x: boundary.width, y: boundary.depth * pos };
+  return { x: 0, y: boundary.depth * pos };
+}
+
+function corridorLink(index: number, x: number, y: number, w: number, d: number): PlacedRoom {
+  return {
+    id: `corridor-link-${index + 1}`,
+    programId: 'corridor',
+    type: 'corridor',
+    name: 'Hodnik',
+    x: roundToGrid(Math.max(0, x)),
+    y: roundToGrid(Math.max(0, y)),
+    w: roundToGrid(w),
+    d: roundToGrid(d),
+    area: roundToGrid(w * d),
+    doorToCorridor: false,
+  };
 }
 
 function normalizeEntrances(brief: ProjectBrief): ProjectEntrance[] {

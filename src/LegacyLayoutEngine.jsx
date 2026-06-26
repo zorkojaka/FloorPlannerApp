@@ -161,23 +161,23 @@ function ProjectWorkflow({onContinue}){
     <div className="projectGrid">
       <aside className="col projectInputs">
         <div className="eyebrow">Okvir etaže</div>
-        <Num label="Površina m²" v={brief.boundary.area} set={v=>updateBoundary({area:v})} min={20} max={500} step={5}/>
-        <Num label="Širina m" v={brief.boundary.width} set={v=>updateBoundary({width:v})} min={4} max={40} step={0.5}/>
-        <Num label="Globina m" v={brief.boundary.depth} set={v=>updateBoundary({depth:v})} min={4} max={40} step={0.5}/>
+        <ProjectNum label="Površina" unit="m²" v={brief.boundary.area} set={v=>updateBoundary({area:v,width:brief.boundary.width,depth:round1(v/Math.max(brief.boundary.width||1,1))})} min={20} max={500} step={5}/>
+        <ProjectNum label="Širina" unit="m" v={brief.boundary.width} set={v=>updateBoundary({width:v,area:round1(v*(brief.boundary.depth||1))})} min={4} max={40} step={0.5}/>
+        <ProjectNum label="Globina" unit="m" v={brief.boundary.depth} set={v=>updateBoundary({depth:v,area:round1((brief.boundary.width||1)*v)})} min={4} max={40} step={0.5}/>
         <div className="eyebrow mt">Glavni vhodi</div>
         <div className="entranceList">
           {entrances.map((entry,i)=><div key={entry.id} className="entranceItem">
             <div className="zTop"><span>vhod {i+1}</span><button onClick={()=>removeEntrance(entry.id)} disabled={entrances.length<=1}>×</button></div>
             <div className="dRow"><span>zid</span><div className="rt3 wrap">{[["N","S"],["E","V"],["S","J"],["W","Z"]].map(([v,l])=><button key={v} className={entry.wall===v?"on":""} onClick={()=>setEntrance(entry.id,{wall:v})}>{l}</button>)}</div></div>
-            <Num label="Pozicija %" v={Math.round((entry.position??0.5)*100)} set={v=>setEntrance(entry.id,{position:clamp(v/100,0,1)})} min={0} max={100} step={5}/>
-            <Num label="Širina m" v={entry.width??1.2} set={v=>setEntrance(entry.id,{width:v})} min={0.8} max={3} step={0.1}/>
+            <ProjectNum label="Pozicija" unit="%" v={Math.round((entry.position??0.5)*100)} set={v=>setEntrance(entry.id,{position:clamp(v/100,0,1)})} min={0} max={100} step={5}/>
+            <ProjectNum label="Širina" unit="m" v={entry.width??1.2} set={v=>setEntrance(entry.id,{width:v})} min={0.8} max={3} step={0.1}/>
           </div>)}
         </div>
         <button className="add" onClick={addEntrance}>+ vhod</button>
         <div className="eyebrow mt">Program sob</div>
-        <Num label="WC" v={brief.rooms.find(r=>r.type==="wc")?.count??0} set={v=>updateRoom("wc",{count:Math.round(v)})} min={0} max={8} step={1}/>
-        <Num label="Pisarne" v={brief.rooms.find(r=>r.type==="office")?.count??0} set={v=>updateRoom("office",{count:Math.round(v)})} min={0} max={20} step={1}/>
-        <Num label="Mest / pisarno" v={brief.rooms.find(r=>r.type==="office")?.workstations??1} set={v=>updateRoom("office",{workstations:Math.round(v)})} min={1} max={8} step={1}/>
+        <ProjectNum label="WC" unit="" v={brief.rooms.find(r=>r.type==="wc")?.count??0} set={v=>updateRoom("wc",{count:Math.round(v)})} min={0} max={8} step={1}/>
+        <ProjectNum label="Pisarne" unit="" v={brief.rooms.find(r=>r.type==="office")?.count??0} set={v=>updateRoom("office",{count:Math.round(v)})} min={0} max={20} step={1}/>
+        <ProjectNum label="Mest / pisarno" unit="" v={brief.rooms.find(r=>r.type==="office")?.workstations??1} set={v=>updateRoom("office",{workstations:Math.round(v)})} min={1} max={8} step={1}/>
         <div className="metricStack">
           <span>program <b>{summary.roomArea.toFixed(1)} m²</b></span>
           <span>hodnik ocena <b>{summary.corridorArea.toFixed(1)} m²</b></span>
@@ -230,7 +230,7 @@ function ProjectWorkflow({onContinue}){
 function FloorSvg({layout}){
   const pad=22, W=layout.boundary.width, D=layout.boundary.depth;
   const vb=`0 0 ${W+pad*2} ${D+pad*2}`;
-  const rooms=[layout.corridor,...layout.rooms];
+  const rooms=[layout.corridor,...(layout.corridorLinks||[]),...layout.rooms];
   return <svg className="floorSvg" viewBox={vb} role="img">
     <rect x={pad} y={pad} width={W} height={D} fill="#f6f7f3" stroke="#2b3138" strokeWidth="0.04"/>
     {rooms.map(r=><g key={r.id}>
@@ -264,6 +264,7 @@ function FloorSignals({layout}){
 
 function roomColor(type){return type==="corridor"?"#d9c27a":type==="wc"?"#7fdede":"#9fc8f0";}
 function floorWeightLabel(key){return ({compactness:"izraba",corridorEfficiency:"hodnik",wetGrouping:"mokri sklop",officeFrontage:"pisarne/okna"})[key]||key;}
+function round1(v){return Math.round(v*10)/10;}
 
 /* ===================== OREHE (razvojni/testni pogled) ===================== */
 function Orehe({library,setLibrary}){
@@ -1350,6 +1351,7 @@ function Door({p,W,D}){
 /* ===================== mali gradniki ===================== */
 function ZNum({label,v,set,max}){ return <label className="znum"><span>{label}</span><input type="range" min="0" max={max} step="50" value={v} onChange={e=>set(+e.target.value)}/><b className="mono">{v}</b></label>; }
 function Num({label,v,set,min,max,step,c}){ return <div className="num"><div className="fhd"><span>{label}</span><span className="mono" style={c?{color:c}:{}}>{v}{label.match(/Širina|Globina|Višina|Z odmik|Parapet|Jedro|Halo/)?" mm":""}</span></div><input type="range" min={min} max={max} step={step} value={v} onChange={e=>set(+e.target.value)} style={c?{accentColor:c}:{}}/></div>; }
+function ProjectNum({label,unit,v,set,min,max,step}){ return <div className="num"><div className="fhd"><span>{label}</span><span className="mono">{v}{unit?` ${unit}`:""}</span></div><input type="range" min={min} max={max} step={step} value={v} onChange={e=>set(+e.target.value)}/></div>; }
 
 const CSS=`
 .app{--bg:#0f1419;--panel:#161c23;--p2:#1b222b;--bd:#252e39;--tx:#d7dee6;--mut:#7c8794;--cy:#16b3b3;
