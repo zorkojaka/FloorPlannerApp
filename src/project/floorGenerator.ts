@@ -70,41 +70,54 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
   const corridorLinks = buildEntranceLinks(entrances, boundary, corridor, sideCorridorWidth);
 
   const rooms: PlacedRoom[] = [];
-  const sideCursors = [0, 0];
   const sideDepths = verticalCorridor
     ? [corridor.x, boundary.width - corridor.x - corridor.w]
     : [corridor.y, boundary.depth - corridor.y - corridor.d];
   const frontageLimit = verticalCorridor ? boundary.depth : boundary.width;
+  const sidePlans: RoomPlan[][] = [[], []];
+  const sideFrontage = [0, 0];
 
   for (const program of orderPrograms(expandPrograms(brief.rooms), roomOrder)) {
     const definition = ROOM_TYPE_DEFINITIONS[program.type];
     if (!definition || program.type === 'corridor') continue;
     const targetArea = estimateRoomProgramArea({ ...program, count: 1 });
-    const sideIndex = sideCursors[0] <= sideCursors[1] ? 0 : 1;
+    const sideIndex = sideFrontage[0] <= sideFrontage[1] ? 0 : 1;
     const maxDepth = Math.max(definition.minDepth, sideDepths[sideIndex]);
-    const size = roomSizeForProgram(program, targetArea, maxDepth);
-    const width = verticalCorridor ? Math.min(maxDepth, size.depth) : size.frontage;
-    const depth = verticalCorridor ? size.frontage : Math.min(maxDepth, size.depth);
-    const cursor = sideCursors[sideIndex];
-    const area = roundToGrid(width * depth);
-
-    rooms.push({
-      id: `${program.id}-${rooms.length + 1}`,
-      programId: program.id,
-      type: program.type,
-      name: definition.name,
-      x: verticalCorridor ? (sideIndex === 0 ? corridor.x - width : corridor.x + corridor.w) : roundToGrid(cursor),
-      y: verticalCorridor ? roundToGrid(cursor) : (sideIndex === 0 ? corridor.y - depth : corridor.y + corridor.d),
-      w: width,
-      d: depth,
-      area,
-      doorToCorridor: definition.corridorAccess === 'required',
-    });
-    sideCursors[sideIndex] += verticalCorridor ? depth : width;
+    const frontage = minimumFrontageForProgram(program, targetArea, maxDepth);
+    sidePlans[sideIndex].push({ program, frontage });
+    sideFrontage[sideIndex] += frontage;
   }
 
-  if (sideCursors.some((cursor) => cursor > frontageLimit)) warnings.push('Rooms exceed available frontage along the corridor.');
-  const usedArea = corridor.area + corridorLinks.reduce((sum, link) => sum + link.area, 0) + rooms.reduce((sum, room) => sum + room.area, 0);
+  for (const sideIndex of [0, 1] as const) {
+    const plans = sidePlans[sideIndex];
+    const totalFrontage = plans.reduce((sum, plan) => sum + plan.frontage, 0);
+    if (totalFrontage > frontageLimit) warnings.push('Rooms exceed available frontage along the corridor.');
+    const scale = totalFrontage > 0 && totalFrontage < frontageLimit ? frontageLimit / totalFrontage : 1;
+    let cursor = 0;
+    for (const plan of plans) {
+      const definition = ROOM_TYPE_DEFINITIONS[plan.program.type];
+      const frontage = roundToGrid(plan.frontage * scale);
+      const sideDepth = Math.max(definition.minDepth, sideDepths[sideIndex]);
+      const width = verticalCorridor ? sideDepth : frontage;
+      const depth = verticalCorridor ? frontage : sideDepth;
+      const area = roundToGrid(width * depth);
+      rooms.push({
+        id: `${plan.program.id}-${rooms.length + 1}`,
+        programId: plan.program.id,
+        type: plan.program.type,
+        name: definition.name,
+        x: verticalCorridor ? (sideIndex === 0 ? corridor.x - width : corridor.x + corridor.w) : roundToGrid(cursor),
+        y: verticalCorridor ? roundToGrid(cursor) : (sideIndex === 0 ? corridor.y - depth : corridor.y + corridor.d),
+        w: width,
+        d: depth,
+        area,
+        doorToCorridor: definition.corridorAccess === 'required',
+      });
+      cursor += frontage;
+    }
+  }
+
+  const usedArea = corridor.area + rooms.reduce((sum, room) => sum + room.area, 0);
 
   return {
     id: opts.id ?? `${roomOrder}-${corridorSide}-${corridorWidth}`,
@@ -148,12 +161,14 @@ function normalizeCorridorPolicy(brief: ProjectBrief, candidateMainWidth?: numbe
   return { minWidth, mainWidth, sideWidth };
 }
 
-function roomSizeForProgram(program: RoomProgram, targetArea: number, maxDepth: number): { frontage: number; depth: number } {
+interface RoomPlan {
+  program: RoomProgram;
+  frontage: number;
+}
+
+function minimumFrontageForProgram(program: RoomProgram, targetArea: number, maxDepth: number): number {
   const definition = ROOM_TYPE_DEFINITIONS[program.type];
-  const preferredDepth = Math.max(definition.minDepth, program.type === 'office' ? 3.6 : 2.2);
-  const depth = roundToGrid(Math.min(maxDepth, Math.max(definition.minDepth, preferredDepth)));
-  const frontage = roundToGrid(Math.max(definition.minWidth, targetArea / Math.max(depth, 0.1)));
-  return { frontage, depth };
+  return roundToGrid(Math.max(definition.minWidth, targetArea / Math.max(maxDepth, definition.minDepth, 0.1)));
 }
 
 function corridorWidthVariants(brief: ProjectBrief): number[] {

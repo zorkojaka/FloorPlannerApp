@@ -41,7 +41,8 @@ describe('project floor generator', () => {
     expect(layout.rooms.filter((room) => room.type === 'office')).toHaveLength(20);
     expect(layout.rooms.some((room) => room.y < layout.corridor.y)).toBe(true);
     expect(layout.rooms.some((room) => room.y > layout.corridor.y)).toBe(true);
-    expect(layout.rooms.every((room) => room.d < 6)).toBe(true);
+    const usedArea = layout.corridor.area + layout.rooms.reduce((sum, room) => sum + room.area, 0);
+    expect(usedArea / layout.boundary.area).toBeGreaterThan(0.9);
   });
 
   it('reports frontage overflow instead of hiding an impossible layout', () => {
