@@ -69,25 +69,23 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
   };
   const corridorLinks = buildEntranceLinks(entrances, boundary, corridor, sideCorridorWidth);
 
-  const roomSideStart = verticalCorridor
-    ? (corridor.x + corridor.w <= boundary.width / 2 ? corridor.x + corridor.w : 0)
-    : (corridor.y + corridor.d <= boundary.depth / 2 ? corridor.y + corridor.d : 0);
-  const roomDepth = Math.max(
-    0,
-    verticalCorridor
-      ? (roomSideStart === 0 ? corridor.x : boundary.width - corridor.x - corridor.w)
-      : (roomSideStart === 0 ? corridor.y : boundary.depth - corridor.y - corridor.d),
-  );
   const rooms: PlacedRoom[] = [];
-  let cursor = 0;
+  const sideCursors = [0, 0];
+  const sideDepths = verticalCorridor
+    ? [corridor.x, boundary.width - corridor.x - corridor.w]
+    : [corridor.y, boundary.depth - corridor.y - corridor.d];
+  const frontageLimit = verticalCorridor ? boundary.depth : boundary.width;
 
   for (const program of orderPrograms(expandPrograms(brief.rooms), roomOrder)) {
     const definition = ROOM_TYPE_DEFINITIONS[program.type];
     if (!definition || program.type === 'corridor') continue;
     const targetArea = estimateRoomProgramArea({ ...program, count: 1 });
-    const roomWidth = Math.max(definition.minWidth, roundToGrid(targetArea / Math.max(roomDepth, definition.minDepth)));
-    const width = roundToGrid(verticalCorridor ? roomDepth : roomWidth);
-    const depth = roundToGrid(verticalCorridor ? roomWidth : Math.max(definition.minDepth, roomDepth));
+    const sideIndex = sideCursors[0] <= sideCursors[1] ? 0 : 1;
+    const maxDepth = Math.max(definition.minDepth, sideDepths[sideIndex]);
+    const size = roomSizeForProgram(program, targetArea, maxDepth);
+    const width = verticalCorridor ? Math.min(maxDepth, size.depth) : size.frontage;
+    const depth = verticalCorridor ? size.frontage : Math.min(maxDepth, size.depth);
+    const cursor = sideCursors[sideIndex];
     const area = roundToGrid(width * depth);
 
     rooms.push({
@@ -95,17 +93,17 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
       programId: program.id,
       type: program.type,
       name: definition.name,
-      x: verticalCorridor ? roomSideStart : roundToGrid(cursor),
-      y: verticalCorridor ? roundToGrid(cursor) : roomSideStart,
+      x: verticalCorridor ? (sideIndex === 0 ? corridor.x - width : corridor.x + corridor.w) : roundToGrid(cursor),
+      y: verticalCorridor ? roundToGrid(cursor) : (sideIndex === 0 ? corridor.y - depth : corridor.y + corridor.d),
       w: width,
       d: depth,
       area,
       doorToCorridor: definition.corridorAccess === 'required',
     });
-    cursor += verticalCorridor ? depth : width;
+    sideCursors[sideIndex] += verticalCorridor ? depth : width;
   }
 
-  if (cursor > (verticalCorridor ? boundary.depth : boundary.width)) warnings.push('Rooms exceed available frontage along the corridor.');
+  if (sideCursors.some((cursor) => cursor > frontageLimit)) warnings.push('Rooms exceed available frontage along the corridor.');
   const usedArea = corridor.area + corridorLinks.reduce((sum, link) => sum + link.area, 0) + rooms.reduce((sum, room) => sum + room.area, 0);
 
   return {
@@ -148,6 +146,14 @@ function normalizeCorridorPolicy(brief: ProjectBrief, candidateMainWidth?: numbe
   const mainWidth = Math.max(minWidth, candidateMainWidth ?? base.mainWidth ?? minWidth);
   const sideWidth = Math.max(minWidth, Math.min(base.sideWidth ?? minWidth, mainWidth));
   return { minWidth, mainWidth, sideWidth };
+}
+
+function roomSizeForProgram(program: RoomProgram, targetArea: number, maxDepth: number): { frontage: number; depth: number } {
+  const definition = ROOM_TYPE_DEFINITIONS[program.type];
+  const preferredDepth = Math.max(definition.minDepth, program.type === 'office' ? 3.6 : 2.2);
+  const depth = roundToGrid(Math.min(maxDepth, Math.max(definition.minDepth, preferredDepth)));
+  const frontage = roundToGrid(Math.max(definition.minWidth, targetArea / Math.max(depth, 0.1)));
+  return { frontage, depth };
 }
 
 function corridorWidthVariants(brief: ProjectBrief): number[] {

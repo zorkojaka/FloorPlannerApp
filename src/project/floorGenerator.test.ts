@@ -21,9 +21,27 @@ describe('project floor generator', () => {
     expect(layout.corridor.w).toBe(10);
     expect(layout.corridor.d).toBe(1.8);
     expect(layout.rooms.map((room) => room.type)).toEqual(['wc', 'office', 'office']);
+    expect(layout.rooms.some((room) => room.y < layout.corridor.y)).toBe(true);
+    expect(layout.rooms.some((room) => room.y > layout.corridor.y)).toBe(true);
     expect(layout.rooms.every((room) => room.doorToCorridor)).toBe(true);
     expect(layout.fitsBoundary).toBe(true);
     expect(layout.warnings).toEqual([]);
+  });
+
+  it('distributes many offices on both sides of the corridor instead of one thin strip', () => {
+    const layout = generateStripFloorLayout({
+      ...brief,
+      boundary: { area: 150, width: 40, depth: 12.5 },
+      rooms: [
+        { id: 'wc', type: 'wc', count: 3 },
+        { id: 'office', type: 'office', count: 20, workstations: 1 },
+        { id: 'corridor', type: 'corridor', count: 1 },
+      ],
+    });
+    expect(layout.rooms.filter((room) => room.type === 'office')).toHaveLength(20);
+    expect(layout.rooms.some((room) => room.y < layout.corridor.y)).toBe(true);
+    expect(layout.rooms.some((room) => room.y > layout.corridor.y)).toBe(true);
+    expect(layout.rooms.every((room) => room.d < 6)).toBe(true);
   });
 
   it('reports frontage overflow instead of hiding an impossible layout', () => {
