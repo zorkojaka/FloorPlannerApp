@@ -23,6 +23,7 @@ import { generateFloorLayoutPool } from "./project/floorGenerator";
 import { estimateProjectArea } from "./project/roomTypes";
 import { floorSignals, initialFloorPreferenceState, rankFloorLayouts, recordFloorPreference, scoreFloorLayout } from "./project/floorPreference";
 import { roomConstraintsFromPlacedRoom } from "./project/roomAdapter";
+import { extractFloorStrategyObservations, induceFloorStrategyProfile, rankFloorLayoutsByProfile, scoreFloorLayoutByProfile } from "./ifc/floorStrategy";
 
 /* =========================================================================
    ZAKLENJEN SISTEM - harmonika orehov
@@ -135,6 +136,7 @@ const DEFAULT_PROJECT = {
 function ProjectWorkflow({onContinue}){
   const [brief,setBrief]=usePersistentState("floorplanner.project.brief",DEFAULT_PROJECT);
   const [pref,setPref]=usePersistentState("floorplanner.project.preference",initialFloorPreferenceState);
+  const [strategyProfile,setStrategyProfile]=usePersistentState("floorplanner.project.strategyProfile",null);
   const [pairIndex,setPairIndex]=usePersistentState("floorplanner.project.pairIndex",0);
   const [selectedRoomId,setSelectedRoomId]=usePersistentState("floorplanner.project.selectedRoomId",null);
   const updateBoundary=(patch)=>setBrief(b=>({...b,boundary:{...b.boundary,...patch}}));
@@ -152,8 +154,8 @@ function ProjectWorkflow({onContinue}){
   const addEntrance=()=>setBrief(b=>({...b,entrances:[...entrances,{id:uid(),wall:"S",position:0.5,width:1.2}]}));
   const removeEntrance=(id)=>setBrief(b=>({...b,entrances:entrances.filter(e=>e.id!==id)}));
   const pool=useMemo(()=>generateFloorLayoutPool(brief),[brief]);
-  const ranked=useMemo(()=>rankFloorLayouts(pool,pref.weights),[pool,pref.weights]);
-  const champion=ranked.find(l=>l.id===pref.championId)||ranked[0];
+  const ranked=useMemo(()=>strategyProfile?rankFloorLayoutsByProfile(pool,strategyProfile):rankFloorLayouts(pool,pref.weights),[pool,pref.weights,strategyProfile]);
+  const champion=strategyProfile?ranked[0]:(ranked.find(l=>l.id===pref.championId)||ranked[0]);
   const challengers=ranked.filter(l=>!champion||l.id!==champion.id);
   const challenger=challengers[pairIndex%Math.max(1,challengers.length)]||ranked[1]||champion;
   const pair=[champion,challenger].filter(Boolean);
@@ -188,6 +190,12 @@ function ProjectWorkflow({onContinue}){
         <ProjectNum label="Glavni hodnik" unit="m" v={corridorPolicy.mainWidth} set={v=>updateCorridorPolicy({mainWidth:v})} min={0.9} max={4} step={0.1}/>
         <ProjectNum label="Stranski hodnik" unit="m" v={corridorPolicy.sideWidth} set={v=>updateCorridorPolicy({sideWidth:v})} min={0.9} max={4} step={0.1}/>
         <div className="softNote">Glavni hodnik je širša hrbtenica; stranski hodniki povežejo vhode do nje. Kasneje te širine induciramo iz IFC referenc.</div>
+        <div className="eyebrow mt">Dokaz učenja</div>
+        <div className="presetRow">
+          <button onClick={()=>{setStrategyProfile(makeStrategyProfile("central"));setPairIndex(0);}}>Centralni WC</button>
+          <button onClick={()=>{setStrategyProfile(makeStrategyProfile("dispersed"));setPairIndex(0);}}>Razpršeni WC</button>
+        </div>
+        {strategyProfile&&<div className="softNote">Aktiven profil: <b>{strategyProfile.name}</b> · cluster {Math.round(strategyProfile.preferClusteredWc*100)} · spread {Math.round(strategyProfile.preferSpreadWc*100)} · križni hodniki {Math.round(strategyProfile.preferInternalCorridors*100)}</div>}
         <div className="eyebrow mt">Program sob</div>
         <ProjectNum label="WC" unit="" v={brief.rooms.find(r=>r.type==="wc")?.count??0} set={v=>updateRoom("wc",{count:Math.round(v)})} min={0} max={8} step={1}/>
         <ProjectNum label="Pisarne" unit="" v={brief.rooms.find(r=>r.type==="office")?.count??0} set={v=>updateRoom("office",{count:Math.round(v)})} min={0} max={20} step={1}/>
@@ -211,7 +219,7 @@ function ProjectWorkflow({onContinue}){
         </div>
         <div className="floorPair">
           {pair.map((layout,i)=><div key={layout.id} className="floorCard">
-            <div className="floorHead"><b>{i===0?"A":"B"} · score {(scoreFloorLayout(layout,pref.weights)*100).toFixed(0)}</b><span>{layout.variant}</span></div>
+            <div className="floorHead"><b>{i===0?"A":"B"} · score {((strategyProfile?scoreFloorLayoutByProfile(layout,strategyProfile):scoreFloorLayout(layout,pref.weights))*100).toFixed(0)}</b><span>{layout.variant}</span></div>
             <FloorSvg layout={layout}/>
             <FloorSignals layout={layout}/>
           </div>)}
@@ -279,6 +287,18 @@ function FloorSignals({layout}){
 function roomColor(type){return type==="corridor"?"#d9c27a":type==="wc"?"#7fdede":"#9fc8f0";}
 function floorWeightLabel(key){return ({compactness:"izraba",corridorEfficiency:"hodnik",wetGrouping:"mokri sklop",officeFrontage:"pisarne/okna"})[key]||key;}
 function round1(v){return Math.round(v*10)/10;}
+function makeStrategyProfile(kind){
+  const plan=kind==="dispersed"
+    ? strategyPlan("dispersed-reference",[0,9000,18000,27000],2)
+    : strategyPlan("central-reference",[0,700,1300,1900],0);
+  return induceFloorStrategyProfile(kind==="dispersed"?"razpršeni WC reference":"centralni WC reference",extractFloorStrategyObservations(plan));
+}
+function strategyPlan(sourceId,wcOffsets,sideCorridors){
+  return {sourceId,name:sourceId,corridors:[
+    {sourceId:"main",name:"Main corridor",role:"main",width:sideCorridors>0?2200:1800},
+    ...Array.from({length:sideCorridors},(_,i)=>({sourceId:`side-${i+1}`,name:`Side ${i+1}`,role:"side",width:1300}))
+  ],rooms:wcOffsets.map((offset,index)=>({sourceId:`wc-${index+1}`,name:`WC ${index+1}`,roomType:"wc",w:2000,d:2400,elements:[{sourceId:`toilet-${index+1}`,name:"Toilet",elementKey:"toilet",x:offset,y:0,w:400,d:600,facing:"N"}]}))};
+}
 
 /* ===================== OREHE (razvojni/testni pogled) ===================== */
 function Orehe({library,setLibrary}){

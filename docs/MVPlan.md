@@ -304,3 +304,4 @@ Implementirati fazo 1: model projekta, tipe sob in osnovno oceno kvadrature.
 - Hodniki imajo politiko širine: minimalna širina, širina glavnega hodnika in širina stranskih priključkov. Normalized IFC observations podpirajo ločeno indukcijo `corridor-width-main` in `corridor-width-side`.
 - Dodani osnovni pisarniški elementi: pisalna miza, pisarniški stol, omara.
 - Dodan `NormalizedIfcPlan` fixture format in pretvorba v induction observations.
+- Dodan dokaz za projektno indukcijo strategije etaže: normalizirane reference izluščijo profil (`centralni WC` ali `razpršeni WC`), isti bazen kandidatov pa se po profilu rangira drugače. S tem preverimo, da reference spreminjajo vedenje brez spremembe generatorja.
