@@ -12,6 +12,8 @@ dist
 dist-ssr
 artifacts
 *.local
+data/ifc/*.ifc
+data/ifc/*.ifczip
 
 # Editor directories and files
 .vscode/*

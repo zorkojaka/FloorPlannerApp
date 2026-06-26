@@ -1,0 +1,173 @@
+{
+  "file": "data/ifc/AC20-Institute-Var-2.ifc",
+  "bytes": 10786515,
+  "spaces": 82,
+  "entityCounts": {
+    "IfcSpace": 82,
+    "IfcDoor": 77,
+    "IfcWindow": 206,
+    "IfcWall": 0,
+    "IfcFurnishingElement": 253
+  },
+  "normalized": {
+    "rooms": 69,
+    "corridors": 13,
+    "byType": {
+      "office": 61,
+      "wc": 8
+    }
+  },
+  "corridorWidthsMm": {
+    "min": 2000,
+    "median": 2000,
+    "max": 5400
+  },
+  "sampleRooms": [
+    {
+      "name": "Besprechungsraum I",
+      "type": "office",
+      "w": 5600,
+      "d": 4400
+    },
+    {
+      "name": "Besprechungsraum II",
+      "type": "office",
+      "w": 5800,
+      "d": 4400
+    },
+    {
+      "name": "Technikraum I",
+      "type": "office",
+      "w": 5800,
+      "d": 4400
+    },
+    {
+      "name": "Technikraum II",
+      "type": "office",
+      "w": 5800,
+      "d": 4400
+    },
+    {
+      "name": "Technikraum III",
+      "type": "office",
+      "w": 5800,
+      "d": 4400
+    },
+    {
+      "name": "Seminarraum",
+      "type": "office",
+      "w": 11600,
+      "d": 11400
+    },
+    {
+      "name": "Technikraum IV",
+      "type": "office",
+      "w": 4400,
+      "d": 2800
+    },
+    {
+      "name": "WC Herren",
+      "type": "wc",
+      "w": 4400,
+      "d": 2900
+    },
+    {
+      "name": "Labor K1",
+      "type": "office",
+      "w": 4400,
+      "d": 2800
+    },
+    {
+      "name": "Labor K2",
+      "type": "office",
+      "w": 4400,
+      "d": 2800
+    },
+    {
+      "name": "Labor K3",
+      "type": "office",
+      "w": 4400,
+      "d": 2800
+    },
+    {
+      "name": "Labor K4",
+      "type": "office",
+      "w": 4400,
+      "d": 2800
+    }
+  ],
+  "sampleCorridors": [
+    {
+      "sourceId": "29513",
+      "name": "Flur Keller West",
+      "role": "main",
+      "width": 2000
+    },
+    {
+      "sourceId": "29934",
+      "name": "Flur Keller Ost",
+      "role": "main",
+      "width": 2000
+    },
+    {
+      "sourceId": "30377",
+      "name": "Flur Keller Treppe",
+      "role": "main",
+      "width": 5400
+    },
+    {
+      "sourceId": "75069",
+      "name": "Flur EG West",
+      "role": "main",
+      "width": 2000
+    },
+    {
+      "sourceId": "79700",
+      "name": "Flur EG Ost",
+      "role": "main",
+      "width": 2000
+    },
+    {
+      "sourceId": "81007",
+      "name": "Flur EG Eingang",
+      "role": "main",
+      "width": 5400
+    },
+    {
+      "sourceId": "126141",
+      "name": "Flur 1.OG West",
+      "role": "main",
+      "width": 2000
+    },
+    {
+      "sourceId": "127407",
+      "name": "Flur 1.OG Ost",
+      "role": "main",
+      "width": 2000
+    },
+    {
+      "sourceId": "128271",
+      "name": "Flur 1.OG Treppe",
+      "role": "main",
+      "width": 5400
+    },
+    {
+      "sourceId": "186903",
+      "name": "Flur 2.OG West",
+      "role": "main",
+      "width": 2000
+    },
+    {
+      "sourceId": "187346",
+      "name": "Flur 2.OG Treppe",
+      "role": "main",
+      "width": 5400
+    },
+    {
+      "sourceId": "187767",
+      "name": "Flur 2.OG Ost",
+      "role": "main",
+      "width": 2000
+    }
+  ]
+}
