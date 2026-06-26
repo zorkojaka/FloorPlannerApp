@@ -22,6 +22,7 @@ import { ACCESSIBLE_BATHROOM_REFS, CLASSIC_BATHROOM_REFS } from "./training/clas
 import { generateFloorLayoutPool } from "./project/floorGenerator";
 import { estimateProjectArea } from "./project/roomTypes";
 import { floorSignals, initialFloorPreferenceState, rankFloorLayouts, recordFloorPreference, scoreFloorLayout } from "./project/floorPreference";
+import { roomConstraintsFromPlacedRoom } from "./project/roomAdapter";
 
 /* =========================================================================
    ZAKLENJEN SISTEM - harmonika orehov
@@ -97,7 +98,7 @@ function Workflow({library,setLibrary}){
       ))}
     </div>
     {phase==="faza0" && <div className="phaseBody"><div className="phaseLead">Faza 0 — šolanje: vržeš noter primere dobre prakse, sistem izlušči znanje (envelope, prior kanalov). Zgodi se enkrat/občasno, ne pri vsakem projektu.</div><O9 library={library} setLibrary={setLibrary}/></div>}
-    {phase==="projekt" && <ProjectWorkflow onContinue={()=>setPhase("korak2")}/>}
+    {phase==="projekt" && <ProjectWorkflow onContinue={(room)=>{if(room)rp.applyRoomConstraints(roomConstraintsFromPlacedRoom(room));setPhase("korak2");}}/>}
     {phase==="korak1" && <div className="phaseBody"><O1 library={library} setLibrary={setLibrary}/></div>}
     {phase==="korak2" && <div className="phaseBody">
       <div className="phaseLead">Korak 2 — omejitve sobe: »tako je«. Velikost, vrata, prepovedane cone, fiksni elementi. Ta nabor je vmesnik, ki ga kasneje napolni engine za razporeditev sob.</div>
@@ -133,6 +134,7 @@ function ProjectWorkflow({onContinue}){
   const [brief,setBrief]=usePersistentState("floorplanner.project.brief",DEFAULT_PROJECT);
   const [pref,setPref]=usePersistentState("floorplanner.project.preference",initialFloorPreferenceState);
   const [pairIndex,setPairIndex]=usePersistentState("floorplanner.project.pairIndex",0);
+  const [selectedRoomId,setSelectedRoomId]=usePersistentState("floorplanner.project.selectedRoomId",null);
   const updateBoundary=(patch)=>setBrief(b=>({...b,boundary:{...b.boundary,...patch}}));
   const updateRoom=(type,patch)=>setBrief(b=>({...b,rooms:b.rooms.map(r=>r.type===type?{...r,...patch}:r)}));
   const pool=useMemo(()=>generateFloorLayoutPool(brief),[brief]);
@@ -148,6 +150,7 @@ function ProjectWorkflow({onContinue}){
   };
   const equalFloor=()=>setPairIndex(i=>i+1);
   const summary=estimateProjectArea(brief);
+  const selectedRoom=champion?.rooms.find(r=>r.id===selectedRoomId)||champion?.rooms[0];
   return <div className="phaseBody">
     <div className="phaseLead">Projekt — najprej razporedimo sobe in hodnike v dano kvadraturo. To je vmesni A/B korak: izbereš boljši tloris etaže, sistem pa se uči preference pred notranjo razporeditvijo sob.</div>
     <div className="projectGrid">
@@ -197,7 +200,13 @@ function ProjectWorkflow({onContinue}){
           {Object.entries(pref.weights).map(([k,v])=><span key={k}>{floorWeightLabel(k)} <b>{Math.round(v*100)}</b></span>)}
         </div>
         <div className="softNote">To je isti princip kot A/B pri notranji postavitvi, samo da izbiraš razporeditev sob. Naslednji korak bo, da izbrani kandidat napolni posamezne sobe z opremo.</div>
-        <button className="regen" onClick={onContinue}>Naprej → notranjost izbrane sobe</button>
+        <div className="eyebrow mt">Soba za notranjost</div>
+        <div className="roomPick">
+          {(champion?.rooms||[]).map(room=><button key={room.id} className={selectedRoom?.id===room.id?"on":""} onClick={()=>setSelectedRoomId(room.id)}>
+            <b>{room.name}</b><span>{room.w.toFixed(1)}×{room.d.toFixed(1)} m</span>
+          </button>)}
+        </div>
+        <button className="regen" onClick={()=>onContinue(selectedRoom)}>Naprej → notranjost izbrane sobe</button>
       </aside>
     </div>
   </div>;
@@ -583,10 +592,14 @@ function useRoomProject(library){
   };
   const setChannel=(id,patch)=>setChannels(C=>C.map(c=>c.id===id?{...c,...patch}:c));
   const setInst=(id,patch)=>setProg(P=>P.map(p=>p.id===id?{...p,...patch}:p));
+  const applyRoomConstraints=(rc)=>{
+    setW(rc.W); setD(rc.D); setWet(rc.wetWall); setProg([...rc.doors,...rc.fixtures]); setZones(rc.zones||[]);
+    setAllowFloorRoutes(Boolean(rc.routingPolicy?.floorAllowed)); setSeed(s=>s+1);
+  };
   return {W,setW,D,setD,wet,setWet,prog,setProg,setInst,soft,setSoft,allowFloorRoutes,setAllowFloorRoutes,zones,setZones,setZone,
     pool:ranked,idx,setIdx,seed,setSeed,pref,channels,setChannel,cfg,feasibility,cornerEls,hasDoor,best,championKey,championEvents,explore,setExplore,
     abPair,optionA,optionB,bestChannelScores,routing,choosePreference,chooseEqualPreference,chooseChampionStays,
-    pathMin,setPathMin,pathWant,setPathWant,showPaths,setShowPaths,paths,comfort,search,expandSearch};
+    pathMin,setPathMin,pathWant,setPathWant,showPaths,setShowPaths,paths,comfort,search,expandSearch,applyRoomConstraints};
 }
 
 function candidateKey(candidate){
@@ -1482,6 +1495,7 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .floorSignals{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:9px;font-size:10.5px;color:var(--mut)}.floorSignals span,.metricStack span{background:var(--p2);border:1px solid var(--bd);border-radius:6px;padding:7px}.floorSignals b,.metricStack b{float:right;color:var(--cy)}
 .floorSignals .bad,.metricStack .bad{color:#f08a78;border-color:#7a3028}.metricStack .ok{color:#7fdede;border-color:#1f4444}
 .metricStack{display:grid;gap:6px;font-size:10.5px;color:var(--mut);margin-top:10px}.floorBtns{margin:0;grid-template-columns:1fr 1fr 1fr auto}
+.roomPick{display:grid;gap:6px;margin-top:8px}.roomPick button{display:flex;justify-content:space-between;gap:8px;align-items:center;text-align:left;background:var(--p2);border:1px solid var(--bd);color:var(--tx);border-radius:7px;padding:8px 9px;cursor:pointer}.roomPick button.on{border-color:var(--cy);background:#0e2626}.roomPick span{color:var(--mut);font-size:10px}
 @media(max-width:1180px){.projectGrid{grid-template-columns:1fr}.floorPair{grid-template-columns:1fr}.floorBtns{grid-template-columns:1fr}}
 /* zložljive sekcije desnega stolpca */
 .sec{border-top:1px solid var(--bd)}.sec:first-child{border-top:none}
