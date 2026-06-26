@@ -1,0 +1,76 @@
+{
+  "file": "data/ifc/AC20-FZK-Haus.ifc",
+  "bytes": 2526544,
+  "spaces": 7,
+  "entityCounts": {
+    "IfcSpace": 7,
+    "IfcDoor": 5,
+    "IfcWindow": 11,
+    "IfcWall": 0,
+    "IfcWallStandardCase": 13,
+    "IfcFurnishingElement": 0,
+    "IfcSanitaryTerminal": 0
+  },
+  "normalized": {
+    "rooms": 6,
+    "corridors": 1,
+    "byType": {
+      "office": 5,
+      "wc": 1
+    },
+    "byWcKind": {
+      "unclassified": 1
+    }
+  },
+  "corridorWidthsMm": {
+    "min": 1588,
+    "median": 1588,
+    "max": 1588
+  },
+  "sampleRooms": [
+    {
+      "name": "Schlafzimmer",
+      "type": "office",
+      "w": 5450,
+      "d": 4050
+    },
+    {
+      "name": "Bad",
+      "type": "wc",
+      "w": 3710,
+      "d": 3370
+    },
+    {
+      "name": "Buero",
+      "type": "office",
+      "w": 3710,
+      "d": 3500
+    },
+    {
+      "name": "Wohnen",
+      "type": "office",
+      "w": 7005,
+      "d": 3710
+    },
+    {
+      "name": "Küche",
+      "type": "office",
+      "w": 4395,
+      "d": 3710
+    },
+    {
+      "name": "Galerie",
+      "type": "office",
+      "w": 11400,
+      "d": 9400
+    }
+  ],
+  "sampleCorridors": [
+    {
+      "sourceId": "34191",
+      "name": "Flur",
+      "role": "side",
+      "width": 1588
+    }
+  ]
+}
