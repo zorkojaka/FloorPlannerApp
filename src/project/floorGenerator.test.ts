@@ -59,6 +59,23 @@ describe('project floor generator', () => {
     expect(pool.length).toBeGreaterThan(4);
     expect(new Set(pool.map((layout) => layout.id)).size).toBe(pool.length);
     expect(pool.some((layout) => layout.corridor.y > 0)).toBe(true);
+    expect(pool.some((layout) => layout.variant.includes('center-cross'))).toBe(true);
+  });
+
+  it('offers variants with wc rooms dispersed among offices', () => {
+    const pool = generateFloorLayoutPool({
+      ...brief,
+      boundary: { area: 1600, width: 40, depth: 40 },
+      rooms: [
+        { id: 'wc', type: 'wc', count: 4 },
+        { id: 'office', type: 'office', count: 12, workstations: 1 },
+        { id: 'corridor', type: 'corridor', count: 1 },
+      ],
+    });
+    const spread = pool.find((layout) => layout.variant.startsWith('spread-wc'));
+    expect(spread).toBeTruthy();
+    const wcIndexes = spread!.rooms.map((room, index) => room.type === 'wc' ? index : -1).filter((index) => index >= 0);
+    expect(Math.max(...wcIndexes) - Math.min(...wcIndexes)).toBeGreaterThan(4);
   });
 
   it('routes the main corridor from the first floor entrance and keeps all entrances', () => {

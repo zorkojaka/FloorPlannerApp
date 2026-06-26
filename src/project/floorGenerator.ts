@@ -35,7 +35,8 @@ export interface FloorLayoutOptions {
   id?: string;
   corridorWidth?: number;
   corridorSide?: 'north' | 'south' | 'west' | 'east';
-  roomOrder?: 'program' | 'reverse' | 'offices-first' | 'wc-first';
+  roomOrder?: 'program' | 'reverse' | 'offices-first' | 'wc-first' | 'alternating' | 'spread-wc';
+  internalCorridors?: 'none' | 'center-cross' | 'thirds';
 }
 
 export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayoutOptions | number = {}): FloorLayout {
@@ -47,6 +48,7 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
   const primaryEntrance = entrances[0];
   const corridorSide = opts.corridorSide ?? sideFromEntrance(primaryEntrance);
   const roomOrder = opts.roomOrder ?? 'program';
+  const internalCorridors = opts.internalCorridors ?? 'none';
   const boundary = resolveBoundary(brief);
   const warnings: string[] = [];
   const summary = estimateProjectArea(brief);
@@ -67,7 +69,10 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
     area: (verticalCorridor ? boundary.depth : boundary.width) * corridorWidth,
     doorToCorridor: false,
   };
-  const corridorLinks = buildEntranceLinks(entrances, boundary, corridor, sideCorridorWidth);
+  const corridorLinks = [
+    ...buildEntranceLinks(entrances, boundary, corridor, sideCorridorWidth),
+    ...buildInternalCorridors(boundary, corridor, sideCorridorWidth, internalCorridors),
+  ];
 
   const rooms: PlacedRoom[] = [];
   const sideDepths = verticalCorridor
@@ -121,7 +126,7 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
 
   return {
     id: opts.id ?? `${roomOrder}-${corridorSide}-${corridorWidth}`,
-    variant: `${roomOrder} · hodnik ${corridorLabel(corridorSide)} · ${corridorWidth.toFixed(1)} m`,
+    variant: `${roomOrder} · hodnik ${corridorLabel(corridorSide)} · ${corridorWidth.toFixed(1)} m${internalCorridors !== 'none' ? ' · +' + internalCorridors : ''}`,
     boundary,
     rooms,
     corridor,
@@ -140,7 +145,15 @@ export function generateFloorLayoutPool(brief: ProjectBrief): FloorLayout[] {
   for (const corridorSide of sides as Array<'south' | 'north' | 'west' | 'east'>) {
     for (const roomOrder of ['program', 'reverse', 'offices-first', 'wc-first'] as const) {
       for (const corridorWidth of corridorWidthVariants(brief)) {
-        variants.push({ corridorSide, roomOrder, corridorWidth, id: `${corridorSide}-${roomOrder}-${corridorWidth}` });
+        for (const internalCorridors of ['none', 'center-cross', 'thirds'] as const) {
+          variants.push({ corridorSide, roomOrder, corridorWidth, internalCorridors, id: `${corridorSide}-${roomOrder}-${corridorWidth}-${internalCorridors}` });
+        }
+      }
+    }
+    for (const roomOrder of ['alternating', 'spread-wc'] as const) {
+      const corridorWidth = normalizeCorridorPolicy(brief).mainWidth;
+      for (const internalCorridors of ['none', 'center-cross'] as const) {
+        variants.push({ corridorSide, roomOrder, corridorWidth, internalCorridors, id: `${corridorSide}-${roomOrder}-${corridorWidth}-${internalCorridors}` });
       }
     }
   }
@@ -151,6 +164,25 @@ export function generateFloorLayoutPool(brief: ProjectBrief): FloorLayout[] {
     if (!unique.has(key)) unique.set(key, layout);
   }
   return [...unique.values()];
+}
+
+function buildInternalCorridors(
+  boundary: FloorLayout['boundary'],
+  corridor: PlacedRoom,
+  corridorWidth: number,
+  mode: NonNullable<FloorLayoutOptions['internalCorridors']>,
+): PlacedRoom[] {
+  if (mode === 'none') return [];
+  const verticalMain = corridor.d > corridor.w;
+  const positions = mode === 'thirds' ? [1 / 3, 2 / 3] : [0.5];
+  return positions.map((position, index) => {
+    if (verticalMain) {
+      const y = boundary.depth * position - corridorWidth / 2;
+      return corridorLink(100 + index, 0, y, boundary.width, corridorWidth);
+    }
+    const x = boundary.width * position - corridorWidth / 2;
+    return corridorLink(100 + index, x, 0, corridorWidth, boundary.depth);
+  });
 }
 
 function normalizeCorridorPolicy(brief: ProjectBrief, candidateMainWidth?: number): CorridorPolicy {
@@ -268,7 +300,38 @@ function orderPrograms(programs: RoomProgram[], order: FloorLayoutOptions['roomO
   if (order === 'reverse') return [...nonCorridors].reverse();
   if (order === 'offices-first') return [...nonCorridors].sort((a, b) => Number(b.type === 'office') - Number(a.type === 'office'));
   if (order === 'wc-first') return [...nonCorridors].sort((a, b) => Number(b.type === 'wc') - Number(a.type === 'wc'));
+  if (order === 'alternating') return interleaveByType(nonCorridors);
+  if (order === 'spread-wc') return spreadWetRooms(nonCorridors);
   return nonCorridors;
+}
+
+function interleaveByType(programs: RoomProgram[]): RoomProgram[] {
+  const buckets = new Map<RoomType, RoomProgram[]>();
+  for (const program of programs) buckets.set(program.type, [...(buckets.get(program.type) || []), program]);
+  const types = [...buckets.keys()].sort();
+  const result: RoomProgram[] = [];
+  while (types.some((type) => (buckets.get(type) || []).length > 0)) {
+    for (const type of types) {
+      const next = buckets.get(type)?.shift();
+      if (next) result.push(next);
+    }
+  }
+  return result;
+}
+
+function spreadWetRooms(programs: RoomProgram[]): RoomProgram[] {
+  const wet = programs.filter((program) => program.type === 'wc');
+  const dry = programs.filter((program) => program.type !== 'wc');
+  if (wet.length === 0 || dry.length === 0) return programs;
+  const result: RoomProgram[] = [];
+  const spacing = Math.max(1, Math.ceil(dry.length / wet.length));
+  let wetIndex = 0;
+  for (let i = 0; i < dry.length; i++) {
+    if (i % spacing === 0 && wetIndex < wet.length) result.push(wet[wetIndex++]);
+    result.push(dry[i]);
+  }
+  while (wetIndex < wet.length) result.push(wet[wetIndex++]);
+  return result;
 }
 
 function roundToGrid(value: number, grid = 0.1): number {
