@@ -267,15 +267,18 @@ function ProjectWorkflow({onContinue}){
 }
 
 function FloorSvg({layout}){
-  const pad=22, W=layout.boundary.width, D=layout.boundary.depth;
+  const W=layout.boundary.width, D=layout.boundary.depth;
+  const pad=clamp(Math.max(W,D)*0.04,0.6,2);
+  const fontSize=clamp(Math.max(W,D)*0.018,0.28,1.1);
+  const strokeWidth=clamp(Math.max(W,D)*0.0018,0.025,0.08);
   const vb=`0 0 ${W+pad*2} ${D+pad*2}`;
-  const rooms=[layout.corridor,...(layout.corridorLinks||[]),...layout.rooms];
+  const rooms=[...layout.rooms,layout.corridor,...(layout.corridorLinks||[])];
   return <svg className="floorSvg" viewBox={vb} role="img">
-    <rect x={pad} y={pad} width={W} height={D} fill="#f6f7f3" stroke="#2b3138" strokeWidth="0.04"/>
+    <rect x={pad} y={pad} width={W} height={D} fill="#f6f7f3" stroke="#2b3138" strokeWidth={strokeWidth}/>
     {rooms.map(r=><g key={r.id}>
-      <rect x={pad+r.x} y={pad+r.y} width={r.w} height={r.d} fill={roomColor(r.type)} stroke="#22313a" strokeWidth="0.035"/>
-      <text x={pad+r.x+r.w/2} y={pad+r.y+r.d/2} textAnchor="middle" dominantBaseline="middle" fontSize="0.32" fill="#10161b">{r.name}</text>
-      {r.doorToCorridor&&<rect x={pad+r.x+r.w/2-0.35} y={pad+r.y-0.04} width="0.7" height="0.08" fill="#e2553f"/>}
+      <rect x={pad+r.x} y={pad+r.y} width={r.w} height={r.d} fill={roomColor(r.type)} stroke={r.type==="corridor"?"#8a6d19":"#22313a"} strokeWidth={r.type==="corridor"?strokeWidth*1.5:strokeWidth}/>
+      <text x={pad+r.x+r.w/2} y={pad+r.y+r.d/2} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize} fill="#10161b">{r.name}</text>
+      {r.doorToCorridor&&<rect x={pad+r.x+r.w/2-0.35} y={pad+r.y-strokeWidth} width="0.7" height={strokeWidth*2} fill="#e2553f"/>}
     </g>)}
     {(layout.entrances||[]).map(e=><EntranceMark key={e.id} entry={e} pad={pad} W={W} D={D}/>)}
   </svg>;
@@ -301,7 +304,7 @@ function FloorSignals({layout}){
   </div>;
 }
 
-function roomColor(type){return type==="corridor"?"#d9c27a":type==="wc"?"#7fdede":"#9fc8f0";}
+function roomColor(type){return type==="corridor"?"#d6b652":type==="wc"?"#7fdede":"#9fc8f0";}
 function floorWeightLabel(key){return ({compactness:"izraba",corridorEfficiency:"hodnik",wetGrouping:"mokri sklop",officeFrontage:"pisarne/okna"})[key]||key;}
 function round1(v){return Math.round(v*10)/10;}
 function makeStrategyProfile(kind){
