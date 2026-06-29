@@ -277,7 +277,7 @@ function FloorSvg({layout}){
     <rect x={pad} y={pad} width={W} height={D} fill="#f6f7f3" stroke="#2b3138" strokeWidth={strokeWidth}/>
     {rooms.map(r=><g key={r.id}>
       <rect x={pad+r.x} y={pad+r.y} width={r.w} height={r.d} fill={roomColor(r.type)} stroke={r.type==="corridor"?"#8a6d19":"#22313a"} strokeWidth={r.type==="corridor"?strokeWidth*1.5:strokeWidth}/>
-      <text x={pad+r.x+r.w/2} y={pad+r.y+r.d/2} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize} fill="#10161b">{r.name}</text>
+      <text x={pad+r.x+r.w/2} y={pad+r.y+r.d/2} textAnchor="middle" dominantBaseline="middle" fontSize={roomLabelSize(r,fontSize)} fontWeight={r.type==="wc"?"700":"400"} fill="#10161b">{roomLabel(r)}</text>
       {r.doorToCorridor&&<rect x={pad+r.x+r.w/2-0.35} y={pad+r.y-strokeWidth} width="0.7" height={strokeWidth*2} fill="#e2553f"/>}
     </g>)}
     {(layout.entrances||[]).map(e=><EntranceMark key={e.id} entry={e} pad={pad} W={W} D={D}/>)}
@@ -305,6 +305,15 @@ function FloorSignals({layout}){
 }
 
 function roomColor(type){return type==="corridor"?"#d6b652":type==="wc"?"#7fdede":"#9fc8f0";}
+function roomLabel(room){
+  if(room.type==="wc"&&room.wcKind==="male") return "♂";
+  if(room.type==="wc"&&room.wcKind==="female") return "♀";
+  if(room.type==="wc") return "WC";
+  return room.name;
+}
+function roomLabelSize(room,fontSize){
+  return room.type==="wc"?fontSize*1.8:fontSize;
+}
 function floorWeightLabel(key){return ({compactness:"izraba",corridorEfficiency:"hodnik",wetGrouping:"mokri sklop",officeFrontage:"pisarne/okna"})[key]||key;}
 function round1(v){return Math.round(v*10)/10;}
 function makeStrategyProfile(kind){
