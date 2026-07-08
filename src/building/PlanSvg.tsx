@@ -1,4 +1,27 @@
 import { entrancePoint, toM2, roomArea, type ReferencePlan, type RoomType } from './schema';
+import type { FloorItem } from './furnish';
+
+const FURN_FILL: Record<string, string> = {
+  desk: '#1f4a63',
+  chair: '#2c3a4a',
+  cabinet: '#3a4656',
+  storage: '#3a4656',
+  shelf: '#3a4656',
+  toilet: '#43506a',
+  sink: '#274f60',
+  urinal: '#274f60',
+};
+
+const FURN_STROKE: Record<string, string> = {
+  desk: '#6fb0d8',
+  chair: '#7183a0',
+  cabinet: '#8497ad',
+  storage: '#8497ad',
+  shelf: '#8497ad',
+  toilet: '#c6cedb',
+  sink: '#79b6cc',
+  urinal: '#79b6cc',
+};
 
 const FILL: Record<RoomType, string> = {
   office: '#173242',
@@ -23,9 +46,11 @@ interface PlanSvgProps {
   /** ciljna širina v px */
   width?: number;
   showLabels?: boolean;
+  /** oprema po sobah (svetovne koordinate) — nariše se čez sobe */
+  floorItems?: FloorItem[];
 }
 
-export function PlanSvg({ plan, width = 320, showLabels = false }: PlanSvgProps) {
+export function PlanSvg({ plan, width = 320, showLabels = false, floorItems }: PlanSvgProps) {
   const margin = Math.max(plan.outline.w, plan.outline.h) * 0.04;
   const vb = {
     x: plan.outline.x - margin,
@@ -94,6 +119,44 @@ export function PlanSvg({ plan, width = 320, showLabels = false }: PlanSvgProps)
           )}
         </g>
       ))}
+      {floorItems?.map((item, index) => {
+        if (item.kind === 'door') {
+          return (
+            <g key={`f${index}`}>
+              {item.swing && (
+                <rect
+                  x={item.swing.x}
+                  y={item.swing.y}
+                  width={item.swing.w}
+                  height={item.swing.h}
+                  fill="#1fbf7522"
+                  stroke="#1fbf7566"
+                  strokeWidth={vb.w / 900}
+                />
+              )}
+              <rect
+                x={item.rect.x}
+                y={item.rect.y}
+                width={item.rect.w}
+                height={item.rect.h}
+                fill="#1fbf75"
+              />
+            </g>
+          );
+        }
+        return (
+          <rect
+            key={`f${index}`}
+            x={item.rect.x}
+            y={item.rect.y}
+            width={item.rect.w}
+            height={item.rect.h}
+            fill={FURN_FILL[item.category] ?? '#3a4656'}
+            stroke={FURN_STROKE[item.category] ?? '#8497ad'}
+            strokeWidth={vb.w / 500}
+          />
+        );
+      })}
       {plan.entrances.map((entrance, index) => {
         const point = entrancePoint(plan.outline, entrance);
         const r = vb.w / 55;

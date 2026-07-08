@@ -86,6 +86,18 @@ export function baseLib(): ElementLibrary {
       clear: { core: 500, halo: 650, sat: 900, conf: 0.68, scope: 'room-type' },
       usage: { posture: 'none', userAt: 'front' },
     },
+    shelf: {
+      category: 'shelf',
+      name: 'Regal',
+      w: 1000,
+      d: 500,
+      z: 0,
+      h: 2000,
+      source: 'default',
+      conns: [],
+      clear: { core: 120, halo: 800, sat: 1000, conf: 0.7, scope: 'room-type' },
+      usage: { posture: 'standing', userAt: 'front' },
+    },
     door: {
       category: 'door',
       kind: 'door',

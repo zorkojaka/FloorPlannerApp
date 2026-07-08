@@ -25,9 +25,15 @@ import {
 import { toM2, validateReferencePlan, type ReferencePlan, type WallSide } from './schema';
 import { PlanLegend, PlanSvg } from './PlanSvg';
 import { EXTRACTION_PROMPT } from './extractionPrompt';
+import {
+  furnishFloor,
+  FURNISH_PRESETS,
+  defaultPresetId,
+  type RoomFurnishing,
+} from './furnish';
 import { loadJson, saveJson } from '../shared/storage';
 
-type StepId = 'A' | 'B' | 'C' | 'D' | 'E';
+type StepId = 'A' | 'B' | 'C' | 'D' | 'E' | 'F';
 
 function usePersistentState<T>(key: string, fallback: T): [T, (next: T | ((prev: T) => T)) => void] {
   const storage = typeof window !== 'undefined' ? window.localStorage : undefined;
@@ -73,6 +79,7 @@ export default function BuildingPoC() {
   const [genMsg, setGenMsg] = useState<{ kind: 'infeasible' | 'search'; text: string } | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [finalPlan, setFinalPlan] = useState<ReferencePlan | null>(null);
+  const [furnishChoices, setFurnishChoices] = useState<Record<string, string>>({});
 
   const ruleset = useMemo(() => induceBuildingRules(refs), [refs]);
 
@@ -102,6 +109,7 @@ export default function BuildingPoC() {
     { id: 'C', tag: 'C', title: 'Nova naloga', sub: 'druga stavba, drug vhod, druga števila' },
     { id: 'D', tag: 'D', title: 'Kandidati', sub: 'deterministični generator + ocena' },
     { id: 'E', tag: 'E', title: 'A/B izostritev', sub: 'tvoje izbire → uteži → izhodišče' },
+    { id: 'F', tag: 'F', title: 'Oprema po sobah', sub: 'vsak prostor skozi engine — cela etaža' },
   ];
 
   return (
@@ -175,6 +183,17 @@ export default function BuildingPoC() {
             };
             setRefs([...refs, next]);
           }}
+          onFurnish={() => setStep('F')}
+        />
+      )}
+      {step === 'F' && (
+        <StepFurnish
+          plan={finalPlan}
+          choices={furnishChoices}
+          setChoice={(roomId, presetId) =>
+            setFurnishChoices((prev) => ({ ...prev, [roomId]: presetId }))
+          }
+          resetChoices={() => setFurnishChoices({})}
         />
       )}
     </div>
@@ -630,6 +649,7 @@ function StepAB({
   finalPlan,
   onAdopt,
   onAdoptAsReference,
+  onFurnish,
 }: {
   pool: BuildingCandidate[] | null;
   pref: BuildingPreferenceState;
@@ -638,6 +658,7 @@ function StepAB({
   finalPlan: ReferencePlan | null;
   onAdopt: (plan: ReferencePlan) => void;
   onAdoptAsReference: (plan: ReferencePlan) => void;
+  onFurnish: () => void;
 }) {
   const [adoptedRef, setAdoptedRef] = useState(false);
   if (!pool || pool.length < 2) {
@@ -688,6 +709,9 @@ function StepAB({
                 Od tu naprej prevzame projektant: kandidat je izhodišče, ne končni načrt. Vsaka soba
                 lahko gre nato skozi obstoječi engine opreme-v-sobi (Oreh 1) — gnezdenje.
               </p>
+              <button className="bpBtn primary" style={{ marginTop: 10 }} onClick={onFurnish}>
+                Naprej → oprema po sobah (cela etaža)
+              </button>
             </div>
           )}
         </div>
@@ -737,6 +761,108 @@ function StepAB({
             </div>
           )}
           <button className="bpBtn ghost" onClick={onResetLearning}>Ponastavi učenje</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ───────────────────────── F: Oprema po sobah ───────────────────────── */
+
+const STATUS_LABEL: Record<RoomFurnishing['status'], string> = {
+  found: 'opremljeno',
+  empty: 'samo vrata',
+  'not-found': 'ni šlo',
+  infeasible: 'neizvedljivo',
+};
+
+function StepFurnish({
+  plan,
+  choices,
+  setChoice,
+  resetChoices,
+}: {
+  plan: ReferencePlan | null;
+  choices: Record<string, string>;
+  setChoice: (roomId: string, presetId: string) => void;
+  resetChoices: () => void;
+}) {
+  const furnishings = useMemo(() => (plan ? furnishFloor(plan, choices) : []), [plan, choices]);
+  const floorItems = useMemo(() => furnishings.flatMap((f) => f.items), [furnishings]);
+
+  if (!plan) {
+    return (
+      <div className="bpBody">
+        <p className="bpLead">
+          Najprej v koraku <b>E</b> prevzemi izhodiščni tloris (gumb »Uporabi šampiona kot
+          izhodišče«). Nato se tu vsak prostor opremi skozi engine Oreh 1.
+        </p>
+      </div>
+    );
+  }
+
+  const rooms = furnishings.filter((f) => f.room.type !== 'corridor');
+  const okCount = rooms.filter((f) => f.status === 'found' || f.status === 'empty').length;
+  const failCount = rooms.length - okCount;
+
+  return (
+    <div className="bpBody">
+      <p className="bpLead">
+        <b>Gnezdenje</b>: vsak prostor etaže gre skozi engine opreme-v-sobi (Oreh 1). Preset določa,
+        kateri engine (nabor opreme) postavlja — WC, pisarna, skladišče. Vrata sedejo na steno proti
+        hodniku. Za vsak prostor lahko izbereš svoj preset; rezultat je cela etaža — sobe, hodniki in
+        oprema.
+      </p>
+      <div className="bpRow">
+        <span className={'bpBadge ' + (failCount === 0 ? 'hard' : 'soft')}>
+          {okCount}/{rooms.length} prostorov opremljenih
+        </span>
+        {failCount > 0 && <span className="bpBadge soft">{failCount} ni šlo</span>}
+        <button className="bpBtn ghost" onClick={resetChoices}>
+          Ponastavi izbire (privzeti preseti)
+        </button>
+      </div>
+
+      <div className="bpFurnGrid">
+        <div className="bpPanel bpFurnPlan">
+          <PlanSvg plan={plan} width={760} showLabels floorItems={floorItems} />
+          <div className="bpFurnLegend">
+            {[
+              ['#1f4a63', 'miza'],
+              ['#3a4656', 'omara / regal'],
+              ['#43506a', 'WC školjka'],
+              ['#274f60', 'umivalnik / pisoar'],
+              ['#1fbf75', 'vrata'],
+            ].map(([color, label]) => (
+              <span key={label}>
+                <span className="sw" style={{ background: color }} />
+                {label}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="bpPanel bpFurnList">
+          <h3>Prostori · izbira engine-a</h3>
+          {rooms.map((f) => (
+            <div key={f.room.id} className="bpFurnRow">
+              <div className="bpFurnRowHd">
+                <b>{f.room.name}</b>
+                <span className={'bpFurnStat ' + f.status}>{STATUS_LABEL[f.status]}</span>
+              </div>
+              <select
+                value={choices[f.room.id] ?? defaultPresetId(f.room.type)}
+                onChange={(event) => setChoice(f.room.id, event.target.value)}
+              >
+                {FURNISH_PRESETS.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
+              {f.note && <div className="bpFurnNote">{f.note}</div>}
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -816,4 +942,19 @@ const CSS = `
 .bpAbSide{display:flex;flex-direction:column;gap:10px;min-width:330px}
 .bpAbStats{font-size:12px;color:#aab4bf}
 @media (max-width:1100px){.bpAbPair{min-width:0}}
+.bpFurnGrid{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}
+.bpFurnPlan{flex:1;min-width:520px}
+.bpFurnLegend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#aab4bf;margin-top:10px}
+.bpFurnLegend span{display:inline-flex;align-items:center;gap:6px}
+.bpFurnLegend .sw{width:12px;height:12px;border-radius:2px;display:inline-block}
+.bpFurnList{width:330px;display:flex;flex-direction:column;gap:8px}
+.bpFurnRow{border:1px solid #252e39;border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:6px}
+.bpFurnRowHd{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px}
+.bpFurnRow select{background:#12161b;border:1px solid #2b3744;border-radius:7px;color:#d7dee6;padding:6px 8px;font-size:12.5px}
+.bpFurnStat{font-size:10.5px;padding:2px 7px;border-radius:20px;border:1px solid #2b3744;color:#7e8a96}
+.bpFurnStat.found{border-color:#1f7a4d;color:#7fdea8}
+.bpFurnStat.empty{border-color:#3b4a5c;color:#aab4bf}
+.bpFurnStat.not-found,.bpFurnStat.infeasible{border-color:#a04545;color:#f0a0a0}
+.bpFurnNote{font-size:11.5px;color:#f0b0a0}
+@media (max-width:1100px){.bpFurnPlan{min-width:0}.bpFurnList{width:100%}}
 `;
