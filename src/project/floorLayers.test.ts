@@ -38,11 +38,14 @@ describe('deriveFloorLayers', () => {
     expect(kinds).toContain('material');
     expect(kinds).toContain('waste');
     const people = layers.flows.find((flow) => flow.kind === 'people')!;
-    // hrbtenica + vhodni krak + krak na prostor
+    // hrbtenica (osi hodnikov) + vhodni krak + kraki na prostore
     expect(people.polylines.length).toBeGreaterThanOrEqual(2);
     for (const flow of layers.flows) for (const pl of flow.polylines) expect(pl.length).toBeGreaterThanOrEqual(2);
-    // odpadki tečejo po ločeni sledi (druga cross-koordinata kot ljudje)
+    // odpadki dosežejo rob etaže (izhod)
     const waste = layers.flows.find((flow) => flow.kind === 'waste')!;
-    expect(waste.polylines[0][0].y).not.toBe(people.polylines[0][0].y);
+    const exit = waste.polylines[waste.polylines.length - 1].at(-1)!;
+    const D = layout.boundary.depth;
+    const W = layout.boundary.width;
+    expect(exit.y === 0 || exit.y === D || exit.x === 0 || exit.x === W).toBe(true);
   });
 });

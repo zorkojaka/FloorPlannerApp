@@ -158,7 +158,7 @@ export function furnishFloorLayout(
     const presetId = choices[room.id] ?? defaultFloorPresetId(room.type);
     const fixtureKeys = findFloorPreset(presetId).fixtures(room);
 
-    const doorSide = corridorWall(room, corridors);
+    const doorSide = room.doorSide ?? corridorWall(room, corridors);
     const wallLenM =
       doorSide === 'N' || doorSide === 'S'
         ? room.w

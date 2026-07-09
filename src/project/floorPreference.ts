@@ -91,24 +91,27 @@ export function zoneContiguity(layout: FloorLayout): number {
 function zoneContiguityScore(layout: FloorLayout): number {
   const rooms = layout.rooms.filter((room) => room.type !== 'corridor');
   if (rooms.length < 2) return 1;
-  const corridor = layout.corridor;
-  const horizontal = corridor.w >= corridor.d;
-  const corridorCross = horizontal ? corridor.y + corridor.d / 2 : corridor.x + corridor.w / 2;
-  const sides: PlacedRoom[][] = [[], []];
+  const horizontal = layout.corridor.w >= layout.corridor.d;
+  // sobe grupiramo po vrstah (isti pas ob hodniku), znotraj vrste merimo sosednje pare
+  const rows = new Map<string, PlacedRoom[]>();
   for (const room of rooms) {
-    const cross = horizontal ? room.y + room.d / 2 : room.x + room.w / 2;
-    sides[cross < corridorCross ? 0 : 1].push(room);
+    const key = horizontal ? `${round1(room.y)}_${round1(room.d)}` : `${round1(room.x)}_${round1(room.w)}`;
+    rows.set(key, [...(rows.get(key) || []), room]);
   }
   let adjacent = 0;
   let same = 0;
-  for (const side of sides) {
-    side.sort((a, b) => (horizontal ? a.x - b.x : a.y - b.y));
-    for (let i = 1; i < side.length; i++) {
+  for (const row of rows.values()) {
+    row.sort((a, b) => (horizontal ? a.x - b.x : a.y - b.y));
+    for (let i = 1; i < row.length; i++) {
       adjacent++;
-      if (zoneOf(side[i - 1]) === zoneOf(side[i])) same++;
+      if (zoneOf(row[i - 1]) === zoneOf(row[i])) same++;
     }
   }
   return adjacent ? same / adjacent : 1;
+}
+
+function round1(value: number): number {
+  return Math.round(value * 10) / 10;
 }
 
 function zoneOf(room: PlacedRoom): ZoneId {

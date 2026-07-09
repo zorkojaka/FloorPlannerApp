@@ -336,7 +336,7 @@ function FloorSvg({layout,floorItems,layer="rooms",layers=null}){
     {rooms.map(r=><g key={r.id}>
       <rect x={pad+r.x} y={pad+r.y} width={r.w} height={r.d} fill={roomFill(r)} opacity={flowView&&r.type!=="corridor"?0.5:1} stroke={r.type==="corridor"?"#8a6d19":"#22313a"} strokeWidth={r.type==="corridor"?strokeWidth*1.5:strokeWidth}/>
       {!(hasFurn&&r.type!=="corridor")&&<text x={pad+r.x+r.w/2} y={pad+r.y+r.d/2} textAnchor="middle" dominantBaseline="middle" fontSize={roomLabelSize(r,fontSize)} fontWeight={r.type==="wc"?"700":"400"} fill="#10161b">{roomLabel(r)}</text>}
-      {!hasFurn&&!flowView&&r.doorToCorridor&&<rect x={pad+r.x+r.w/2-0.35} y={pad+r.y-strokeWidth} width="0.7" height={strokeWidth*2} fill="#e2553f"/>}
+      {!hasFurn&&!flowView&&r.doorToCorridor&&(()=>{const d=doorRect(r,strokeWidth);return <rect x={pad+d.x} y={pad+d.y} width={d.w} height={d.h} fill="#e2553f"/>;})()}
     </g>)}
     {hasFurn&&floorItems.map((it,i)=>it.kind==="door"
       ? <rect key={"fi"+i} x={pad+it.x} y={pad+it.y} width={it.w} height={it.h} fill="#e2553f"/>
@@ -349,6 +349,15 @@ function FloorSvg({layout,floorItems,layer="rooms",layers=null}){
   </svg>;
 }
 
+// vrata na tisti rob sobe, ki se dotika hodnika (doorSide iz generatorja)
+function doorRect(r,sw){
+  const t=sw*2,len=Math.min(0.7,Math.min(r.w,r.d)*0.6);
+  const side=r.doorSide||"N";
+  if(side==="N") return {x:r.x+r.w/2-len/2,y:r.y-sw,w:len,h:t};
+  if(side==="S") return {x:r.x+r.w/2-len/2,y:r.y+r.d-sw,w:len,h:t};
+  if(side==="W") return {x:r.x-sw,y:r.y+r.d/2-len/2,w:t,h:len};
+  return {x:r.x+r.w-sw,y:r.y+r.d/2-len/2,w:t,h:len};
+}
 function furnFill(cat){return ({desk:"#5b9bd0",chair:"#89b4da",cabinet:"#caa14e",storage:"#caa14e",shelf:"#caa14e",toilet:"#3fb0b0",sink:"#5cc0c0",urinal:"#5cc0c0"})[cat]||"#b9c0c8";}
 function furnStroke(cat){return ({desk:"#28587e",chair:"#3f6890",cabinet:"#7a5f18",storage:"#7a5f18",shelf:"#7a5f18",toilet:"#166a6a",sink:"#1f7d7d",urinal:"#1f7d7d"})[cat]||"#5b6673";}
 

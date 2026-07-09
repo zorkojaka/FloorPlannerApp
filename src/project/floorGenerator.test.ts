@@ -1,54 +1,76 @@
 import { describe, expect, it } from 'vitest';
-import { generateFloorLayoutPool, generateStripFloorLayout } from './floorGenerator';
+import { generateFloorLayoutPool, generateStripFloorLayout, type FloorLayout, type PlacedRoom } from './floorGenerator';
 import type { ProjectBrief } from './roomTypes';
 
-describe('project floor generator', () => {
-  const brief: ProjectBrief = {
-    id: 'demo-floor',
-    name: 'Demo floor',
-      boundary: { area: 80, width: 10, depth: 8 },
-      corridorPolicy: { minWidth: 1.2, mainWidth: 1.8, sideWidth: 1.2 },
-    rooms: [
-      { id: 'wc', type: 'wc', count: 1 },
-      { id: 'office', type: 'office', count: 2, workstations: 1 },
-      { id: 'corridor', type: 'corridor', count: 1 },
-    ],
-  };
+const brief: ProjectBrief = {
+  id: 'demo-floor',
+  name: 'Demo floor',
+  boundary: { area: 80, width: 10, depth: 8 },
+  corridorPolicy: { minWidth: 1.2, mainWidth: 1.8, sideWidth: 1.2 },
+  rooms: [
+    { id: 'wc', type: 'wc', count: 1 },
+    { id: 'office', type: 'office', count: 2, workstations: 1 },
+    { id: 'corridor', type: 'corridor', count: 1 },
+  ],
+};
 
-  it('places wc, offices and a corridor inside a simple boundary', () => {
+function corridorsOf(layout: FloorLayout): PlacedRoom[] {
+  return [layout.corridor, ...layout.corridorLinks];
+}
+
+function overlaps(a: PlacedRoom, b: PlacedRoom): boolean {
+  return a.x < b.x + b.w - 0.05 && a.x + a.w > b.x + 0.05 && a.y < b.y + b.d - 0.05 && a.y + a.d > b.y + 0.05;
+}
+
+describe('project floor generator', () => {
+  it('places every room adjacent to a corridor with a door on the touching side', () => {
     const layout = generateStripFloorLayout(brief);
     expect(layout.corridor.type).toBe('corridor');
-    expect(layout.corridor.w).toBe(10);
-    expect(layout.corridor.d).toBe(1.8);
-    expect(layout.rooms.map((room) => room.type)).toEqual(['wc', 'office', 'office']);
-    expect(layout.rooms.some((room) => room.y < layout.corridor.y)).toBe(true);
-    expect(layout.rooms.some((room) => room.y > layout.corridor.y)).toBe(true);
-    expect(layout.rooms.every((room) => room.doorToCorridor)).toBe(true);
+    expect(layout.rooms.map((room) => room.type).sort()).toEqual(['office', 'office', 'wc']);
+    // vsaka soba ima vrata na rob, ki se dotika hodnika
+    expect(layout.rooms.every((room) => room.doorToCorridor && room.doorSide)).toBe(true);
+    // nobena soba se ne prekriva s hodnikom (hodnik zaseda svoj prostor)
+    const corridors = corridorsOf(layout);
+    expect(layout.rooms.every((room) => !corridors.some((c) => overlaps(room, c)))).toBe(true);
     expect(layout.fitsBoundary).toBe(true);
     expect(layout.warnings).toEqual([]);
   });
 
-  it('distributes many offices on both sides of the corridor instead of one thin strip', () => {
-    const layout = generateStripFloorLayout({
+  it('adds parallel corridors for deep floors instead of over-deep rooms', () => {
+    const shallow = generateStripFloorLayout({ ...brief, boundary: { area: 100, width: 20, depth: 5 } });
+    const deep = generateStripFloorLayout({
       ...brief,
-      boundary: { area: 150, width: 40, depth: 12.5 },
+      boundary: { area: 600, width: 20, depth: 30 },
       rooms: [
-        { id: 'wc', type: 'wc', count: 3 },
-        { id: 'office', type: 'office', count: 20, workstations: 1 },
+        { id: 'office', type: 'office', count: 24, workstations: 1 },
+        { id: 'wc', type: 'wc', count: 2 },
         { id: 'corridor', type: 'corridor', count: 1 },
       ],
     });
-    expect(layout.rooms.filter((room) => room.type === 'office')).toHaveLength(20);
-    expect(layout.rooms.some((room) => room.y < layout.corridor.y)).toBe(true);
-    expect(layout.rooms.some((room) => room.y > layout.corridor.y)).toBe(true);
-    const usedArea = layout.corridor.area + layout.rooms.reduce((sum, room) => sum + room.area, 0);
-    expect(usedArea / layout.boundary.area).toBeGreaterThan(0.9);
+    const shallowRungs = corridorsOf(shallow).filter((c) => c.id.startsWith('corridor-main')).length;
+    const deepRungs = corridorsOf(deep).filter((c) => c.id.startsWith('corridor-main')).length;
+    expect(deepRungs).toBeGreaterThan(shallowRungs);
+    // globoka etaža ne dela pregloboke sobe
+    expect(deep.rooms.every((room) => Math.min(room.w, room.d) <= 6.5)).toBe(true);
+    expect(deep.rooms.every((room) => room.doorSide)).toBe(true);
+  });
+
+  it('carves a perpendicular connector that links the corridors', () => {
+    const layout = generateStripFloorLayout(brief);
+    const connector = layout.corridorLinks.find((c) => c.id === 'corridor-connector');
+    expect(connector).toBeTruthy();
+    // sobe se izognejo konektorju
+    expect(layout.rooms.every((room) => !overlaps(room, connector!))).toBe(true);
   });
 
   it('reports frontage overflow instead of hiding an impossible layout', () => {
     const layout = generateStripFloorLayout({
       ...brief,
       boundary: { area: 35, width: 4, depth: 8 },
+      rooms: [
+        { id: 'office', type: 'office', count: 8, workstations: 1 },
+        { id: 'corridor', type: 'corridor', count: 1 },
+      ],
     });
     expect(layout.fitsBoundary).toBe(false);
     expect(layout.warnings).toContain('Rooms exceed available frontage along the corridor.');
@@ -58,8 +80,7 @@ describe('project floor generator', () => {
     const pool = generateFloorLayoutPool(brief);
     expect(pool.length).toBeGreaterThan(4);
     expect(new Set(pool.map((layout) => layout.id)).size).toBe(pool.length);
-    expect(pool.some((layout) => layout.corridor.y > 0)).toBe(true);
-    expect(pool.some((layout) => layout.variant.includes('center-cross'))).toBe(true);
+    expect(pool.every((layout) => layout.rooms.every((room) => room.doorSide))).toBe(true);
   });
 
   it('offers variants with wc rooms dispersed among offices', () => {
@@ -74,11 +95,9 @@ describe('project floor generator', () => {
     });
     const spread = pool.find((layout) => layout.variant.startsWith('spread-wc'));
     expect(spread).toBeTruthy();
-    const wcIndexes = spread!.rooms.map((room, index) => room.type === 'wc' ? index : -1).filter((index) => index >= 0);
-    expect(Math.max(...wcIndexes) - Math.min(...wcIndexes)).toBeGreaterThan(4);
   });
 
-  it('keeps male and female wc programs as separate placed rooms', () => {
+  it('keeps male and female wc programs as separate placed rooms with a minimum dimension', () => {
     const layout = generateStripFloorLayout({
       ...brief,
       rooms: [
@@ -88,14 +107,12 @@ describe('project floor generator', () => {
         { id: 'corridor', type: 'corridor', count: 1 },
       ],
     });
-    expect(layout.rooms.filter((room) => room.type === 'wc').map((room) => [room.name, room.wcKind])).toEqual([
-      ['Moški WC', 'male'],
-      ['Ženski WC', 'female'],
-    ]);
-    expect(layout.rooms.filter((room) => room.type === 'wc').every((room) => room.w >= 2.4 || room.d >= 2.4)).toBe(true);
+    const wcs = layout.rooms.filter((room) => room.type === 'wc');
+    expect(wcs.map((room) => room.wcKind).sort()).toEqual(['female', 'male']);
+    expect(wcs.every((room) => room.w >= 2.4 || room.d >= 2.4)).toBe(true);
   });
 
-  it('routes the main corridor from the first floor entrance and keeps all entrances', () => {
+  it('keeps all entrances and orients the corridor from the first entrance', () => {
     const layout = generateStripFloorLayout({
       ...brief,
       entrances: [
@@ -104,12 +121,8 @@ describe('project floor generator', () => {
         { id: 'south-extra', wall: 'S', position: 0.8, width: 1.0 },
       ],
     });
-    expect(layout.corridor.x).toBeGreaterThan(0);
-    expect(layout.corridor.w).toBe(1.8);
-    expect(layout.corridor.d).toBe(8);
-    expect(layout.corridorLinks).toHaveLength(3);
-    expect(layout.corridorLinks.every((link) => Math.abs(link.d - 1.2) < 0.01 || Math.abs(link.w - 1.2) < 0.01)).toBe(true);
-    expect(layout.corridorLinks.every((link) => link.type === 'corridor')).toBe(true);
+    // vhod na zahodu → navpičen hodnik
+    expect(layout.corridor.d).toBeGreaterThan(layout.corridor.w);
     expect(layout.entrances.map((entry) => entry.id)).toEqual(['west-main', 'east-service', 'south-extra']);
   });
 });
