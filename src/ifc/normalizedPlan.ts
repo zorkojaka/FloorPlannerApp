@@ -14,6 +14,14 @@ export interface NormalizedIfcElement {
   facing: Facing;
 }
 
+/** Normaliziran okvir (0..1 glede na sliko) — za verifikacijski overlay ob AI-ekstrakciji. */
+export interface BBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface NormalizedIfcRoom {
   sourceId: string;
   name: string;
@@ -23,6 +31,8 @@ export interface NormalizedIfcRoom {
   zone?: string;
   w: number;
   d: number;
+  /** lega na izvorni sliki (0..1) — samo za verifikacijski prikaz, ne za indukcijo */
+  bbox?: BBox;
   elements: NormalizedIfcElement[];
 }
 

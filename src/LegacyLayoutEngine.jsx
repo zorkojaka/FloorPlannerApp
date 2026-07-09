@@ -29,6 +29,7 @@ import { extractFloorStrategyObservations, induceFloorStrategyProfile, rankFloor
 import { IFC_REFERENCE_SETS } from "./training/ifcReferenceSets";
 import { projectTrainingFromIfcSummary, projectTrainingFromNormalizedPlan } from "./project/projectTraining";
 import { AI_EXTRACTION_PROMPT, parseAiExtractedPlan } from "./ifc/aiExtraction";
+import { extractPlanWithClaude, fileToSource, DEFAULT_EXTRACTION_MODEL } from "./ifc/claudeExtraction";
 
 /* =========================================================================
    ZAKLENJEN SISTEM - harmonika orehov
@@ -370,6 +371,18 @@ function windowBars(r,W,D){
   if(r.x+r.w>=W-e) bars.push({x:r.x+r.w-ins-t,y:r.y+(r.d-lenV)/2,w:t,h:lenV});
   return bars;
 }
+// verifikacijski overlay: okvirji izluščenih prostorov (bbox) čez izvorno sliko tlorisa
+function AiOverlay({src,plan}){
+  const rooms=(plan?.rooms||[]).filter(r=>r.bbox);
+  return <div className="aiOverlay">
+    <img src={src} alt="naložen tloris"/>
+    {rooms.map((r,i)=>{const b=r.bbox;const c=roomColor(r.roomType);return (
+      <div key={i} className="aiBox" style={{left:b.x*100+"%",top:b.y*100+"%",width:b.w*100+"%",height:b.h*100+"%",borderColor:c}}>
+        <span style={{background:c}}>{r.roomType==="wc"?(r.wcKind==="male"?"WC ♂":r.wcKind==="female"?"WC ♀":"WC"):r.name}</span>
+      </div>);})}
+    {plan&&!rooms.length&&<div className="aiBoxNote">Načrt izluščen, a brez okvirjev (bbox) — preveri JSON spodaj.</div>}
+  </div>;
+}
 function furnFill(cat){return ({desk:"#5b9bd0",chair:"#89b4da",cabinet:"#caa14e",storage:"#caa14e",shelf:"#caa14e",toilet:"#3fb0b0",sink:"#5cc0c0",urinal:"#5cc0c0"})[cat]||"#b9c0c8";}
 function furnStroke(cat){return ({desk:"#28587e",chair:"#3f6890",cabinet:"#7a5f18",storage:"#7a5f18",shelf:"#7a5f18",toilet:"#166a6a",sink:"#1f7d7d",urinal:"#1f7d7d"})[cat]||"#5b6673";}
 
@@ -507,6 +520,10 @@ function O9({library,setLibrary,onOpenProject}){
   const [aiRaw,setAiRaw]=usePersistentState("floorplanner.o9.aiPlan","");
   const [aiErr,setAiErr]=useState("");
   const [aiMsg,setAiMsg]=useState("");
+  const [apiKey,setApiKey]=usePersistentState("floorplanner.o9.apiKey","");
+  const [aiSrc,setAiSrc]=useState(null); // {dataUrl, source:{base64,mediaType}, isImage}
+  const [aiPlan,setAiPlan]=useState(null); // razčlenjen načrt za overlay
+  const [aiBusy,setAiBusy]=useState(false);
   const loadPreset=(items)=>setRaw(JSON.stringify(items,null,2));
   const applyTraining=(training)=>{
     saveJson(typeof window==="undefined"?undefined:window.localStorage,"floorplanner.project.brief",training.brief);
@@ -524,9 +541,29 @@ function O9({library,setLibrary,onOpenProject}){
   const importAiPlan=()=>{
     try{
       const plan=parseAiExtractedPlan(aiRaw);
+      setAiPlan(plan);
       applyTraining(projectTrainingFromNormalizedPlan(plan));
       setAiErr("");setAiMsg(`Uvožen načrt "${plan.name}": ${plan.rooms.length} prostorov, ${(plan.corridors||[]).length} hodnikov → uporabljen v projektu.`);
     }catch(e){setAiErr(e.message||String(e));}
+  };
+  const pickAiFile=async(file)=>{
+    if(!file) return;
+    try{
+      const source=await fileToSource(file);
+      setAiSrc({dataUrl:`data:${source.mediaType};base64,${source.base64}`,source,isImage:source.mediaType.startsWith("image/")});
+      setAiPlan(null);setAiErr("");setAiMsg(`Naložena datoteka: ${file.name}`);
+    }catch(e){setAiErr(e.message||String(e));}
+  };
+  const extractWithClaude=async()=>{
+    if(!aiSrc){setAiErr("Najprej naloži sliko ali PDF tlorisa.");return;}
+    setAiBusy(true);setAiErr("");setAiMsg("Claude bere tloris …");
+    try{
+      const {plan,raw}=await extractPlanWithClaude(apiKey,aiSrc.source);
+      setAiRaw(JSON.stringify(plan,null,2));setAiPlan(plan);
+      setAiMsg(`Claude izluščil "${plan.name}": ${plan.rooms.length} prostorov, ${(plan.corridors||[]).length} hodnikov. Preveri overlay, nato uvozi.`);
+      void raw;
+    }catch(e){setAiErr(e.message||String(e));}
+    finally{setAiBusy(false);}
   };
   const run=()=>{
     try{
@@ -561,14 +598,21 @@ function O9({library,setLibrary,onOpenProject}){
         })}
       </div>
       {trainingStatus&&<div className="softNote">Uporabljeno: {trainingStatus}</div>}
-      <div className="eyebrow">AI-ekstrakcija načrta (slika/PDF → JSON)</div>
-      <div className="softNote">Druga uvozna pot poleg IFC: realni tloris skozi AI-prompt v Claudu vrne strukturiran JSON, ki ga tu prilepiš. Napaja isto strateško indukcijo (WC gruča/razpršenost, širine hodnikov).</div>
+      <div className="eyebrow">AI-ekstrakcija načrta (slika/PDF → Claude vision)</div>
+      <div className="softNote">Naloži realni tloris; Claude ga prebere in vrne strukturiran načrt (prostori, hodniki, cone, okvirji). Napaja isto strateško indukcijo. Ključ ostane v tvojem brskalniku (localStorage) — API se kliče neposredno.</div>
+      <input className="aiKey" type="password" value={apiKey} onChange={e=>setApiKey(e.target.value)} placeholder="Anthropic API ključ (sk-ant-…)" spellCheck="false"/>
       <div className="presetRow">
-        <button onClick={copyAiPrompt}>📋 Kopiraj AI-prompt</button>
+        <label className="fileBtn">📎 Naloži sliko/PDF<input type="file" accept="image/*,application/pdf" onChange={e=>pickAiFile(e.target.files?.[0])} hidden/></label>
+        <button className="regen" disabled={!aiSrc||aiBusy||!apiKey} onClick={extractWithClaude}>{aiBusy?"… Claude bere":`🔍 Ekstrahiraj (${DEFAULT_EXTRACTION_MODEL.replace("claude-","")})`}</button>
       </div>
-      <textarea className="refBox" value={aiRaw} onChange={e=>setAiRaw(e.target.value)} placeholder='{"name":"...","corridors":[...],"rooms":[...]}' spellCheck="false"/>
-      <button className="regen" onClick={importAiPlan}>Uvozi in uporabi v projektu</button>
-      <details className="aiPromptView"><summary>AI-prompt (ogled)</summary><pre>{AI_EXTRACTION_PROMPT}</pre></details>
+      {aiSrc&&aiSrc.isImage&&<AiOverlay src={aiSrc.dataUrl} plan={aiPlan}/>}
+      {aiSrc&&!aiSrc.isImage&&<div className="softNote">PDF naložen — predogled ni na voljo; po ekstrakciji preveri prostore v JSON spodaj.</div>}
+      <button className="regen" onClick={importAiPlan} disabled={!aiRaw}>Uvozi in uporabi v projektu</button>
+      <details className="aiPromptView"><summary>Brez ključa / ročno: kopiraj prompt, prilepi JSON</summary>
+        <div className="presetRow"><button onClick={copyAiPrompt}>📋 Kopiraj AI-prompt</button></div>
+        <textarea className="refBox" value={aiRaw} onChange={e=>setAiRaw(e.target.value)} placeholder='{"name":"...","corridors":[...],"rooms":[...]}' spellCheck="false"/>
+        <pre>{AI_EXTRACTION_PROMPT}</pre>
+      </details>
       {aiMsg&&<div className="softNote">{aiMsg}</div>}
       {aiErr&&<div className="warnNote">{aiErr}</div>}
       <div className="eyebrow">Reference JSON</div>
@@ -1734,6 +1778,11 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .metricStack{display:grid;gap:6px;font-size:10.5px;color:var(--mut);margin-top:10px}.floorBtns{margin:0;grid-template-columns:1fr 1fr 1fr auto}
 .roomPick{display:grid;gap:6px;margin-top:8px}.roomPick button{display:flex;justify-content:space-between;gap:8px;align-items:center;text-align:left;background:var(--p2);border:1px solid var(--bd);color:var(--tx);border-radius:7px;padding:8px 9px;cursor:pointer}.roomPick button.on{border-color:var(--cy);background:#0e2626}.roomPick span{color:var(--mut);font-size:10px}
 .aiPromptView summary{cursor:pointer;color:var(--mut);font-size:11px}.aiPromptView pre{background:var(--bg);border:1px solid var(--bd);border-radius:7px;padding:9px;font-size:10.5px;white-space:pre-wrap;max-height:220px;overflow:auto;margin-top:6px}
+.aiKey{width:100%;background:var(--bg);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:9px;margin-bottom:8px}
+.fileBtn{display:inline-flex;align-items:center;gap:5px;background:var(--p2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);padding:6px 11px;font-size:12px;cursor:pointer}
+.aiOverlay{position:relative;margin:8px 0;border:1px solid var(--bd);border-radius:8px;overflow:hidden;line-height:0}.aiOverlay img{width:100%;display:block}
+.aiBox{position:absolute;border:2px solid;border-radius:3px;box-sizing:border-box;pointer-events:none}.aiBox span{position:absolute;left:0;top:0;font-size:9px;line-height:1.3;color:#0b0f14;padding:0 3px;border-radius:0 0 3px 0;white-space:nowrap;font-weight:600}
+.aiBoxNote{position:absolute;left:8px;top:8px;background:#2a1a10;color:#d9a23b;font-size:10px;padding:4px 7px;border-radius:6px}
 .floorHeadTools{display:flex;align-items:center;gap:8px}
 .layerSwitch{display:inline-flex;border:1px solid var(--bd);border-radius:7px;overflow:hidden}.layerSwitch button{background:var(--p2);border:0;border-right:1px solid var(--bd);color:var(--mut);padding:4px 9px;font-size:11px;cursor:pointer}.layerSwitch button:last-child{border-right:0}.layerSwitch button.on{background:#0e2626;color:#7fdede}
 .floorBest.furnished{max-width:960px}.floorBest.furnished .floorSvg{height:440px}

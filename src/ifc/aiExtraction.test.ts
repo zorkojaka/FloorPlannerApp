@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parseAiExtractedPlan } from './aiExtraction';
+import { parseAiExtractedPlan, stripToJson } from './aiExtraction';
+import { buildExtractionRequest, textFromResponse, ANTHROPIC_MESSAGES_URL } from './claudeExtraction';
 import { projectTrainingFromNormalizedPlan } from '../project/projectTraining';
 
 const SAMPLE = JSON.stringify({
@@ -36,6 +37,55 @@ describe('parseAiExtractedPlan', () => {
 
   it('zavrne nepozitivne mere', () => {
     expect(() => parseAiExtractedPlan('{"rooms":[{"roomType":"office","w":0,"d":3000}]}')).toThrow();
+  });
+
+  it('izlušči JSON iz ovitega odgovora in prebere bbox', () => {
+    const wrapped = 'Tukaj je načrt:\n```json\n{"rooms":[{"roomType":"office","w":4000,"d":4000,"bbox":{"x":0.1,"y":0.2,"w":0.3,"h":0.25}}]}\n```';
+    const plan = parseAiExtractedPlan(wrapped);
+    expect(plan.rooms[0].bbox).toEqual({ x: 0.1, y: 0.2, w: 0.3, h: 0.25 });
+  });
+
+  it('bbox se sklampa na 0..1, neveljaven pa izpusti', () => {
+    const plan = parseAiExtractedPlan('{"rooms":[{"roomType":"office","w":1,"d":1,"bbox":{"x":-1,"y":0.5,"w":2,"h":0.3}},{"roomType":"wc","w":1,"d":1,"bbox":{"x":"a"}}]}');
+    expect(plan.rooms[0].bbox).toEqual({ x: 0, y: 0.5, w: 1, h: 0.3 });
+    expect(plan.rooms[1].bbox).toBeUndefined();
+  });
+});
+
+describe('stripToJson', () => {
+  it('izlušči objekt med prvim { in zadnjim }', () => {
+    expect(stripToJson('bl {"a":1} konec')).toBe('{"a":1}');
+  });
+  it('vrže brez objekta', () => {
+    expect(() => stripToJson('brez json')).toThrow();
+  });
+});
+
+describe('buildExtractionRequest', () => {
+  it('sestavi Anthropic zahtevek s sliko in glavo za brskalnik', () => {
+    const req = buildExtractionRequest('sk-test', { base64: 'AAAA', mediaType: 'image/png' });
+    expect(req.url).toBe(ANTHROPIC_MESSAGES_URL);
+    expect(req.headers['x-api-key']).toBe('sk-test');
+    expect(req.headers['anthropic-dangerous-direct-browser-access']).toBe('true');
+    const body = JSON.parse(req.body);
+    expect(body.messages[0].content[0].type).toBe('image');
+    expect(body.messages[0].content[0].source.media_type).toBe('image/png');
+  });
+
+  it('PDF pošlje kot document blok', () => {
+    const req = buildExtractionRequest('sk-test', { base64: 'AAAA', mediaType: 'application/pdf' });
+    const body = JSON.parse(req.body);
+    expect(body.messages[0].content[0].type).toBe('document');
+    expect(body.messages[0].content[0].source.media_type).toBe('application/pdf');
+  });
+});
+
+describe('textFromResponse', () => {
+  it('združi besedilne bloke', () => {
+    expect(textFromResponse({ content: [{ type: 'text', text: '{"a":1}' }, { type: 'text', text: '' }] })).toBe('{"a":1}');
+  });
+  it('vrže brez content polja', () => {
+    expect(() => textFromResponse({})).toThrow();
   });
 });
 
