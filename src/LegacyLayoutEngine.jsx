@@ -24,6 +24,7 @@ import { estimateProjectArea } from "./project/roomTypes";
 import { floorSignals, initialFloorPreferenceState, rankFloorLayouts, recordFloorPreference, scoreFloorLayout } from "./project/floorPreference";
 import { roomConstraintsFromPlacedRoom } from "./project/roomAdapter";
 import { furnishFloorLayout, FLOOR_FURN_PRESETS, defaultFloorPresetId } from "./project/floorFurnish";
+import { deriveFloorLayers, ZONE_DEFS, zoneFill, zoneLabel } from "./project/floorLayers";
 import { extractFloorStrategyObservations, induceFloorStrategyProfile, rankFloorLayoutsByProfile, scoreFloorLayoutByProfile } from "./ifc/floorStrategy";
 import { IFC_REFERENCE_SETS } from "./training/ifcReferenceSets";
 import { projectTrainingFromIfcSummary, projectTrainingFromNormalizedPlan } from "./project/projectTraining";
@@ -146,6 +147,7 @@ function ProjectWorkflow({onContinue}){
   const [selectedRoomId,setSelectedRoomId]=usePersistentState("floorplanner.project.selectedRoomId",null);
   const [furnishOn,setFurnishOn]=usePersistentState("floorplanner.project.furnishOn",false);
   const [furnChoices,setFurnChoices]=usePersistentState("floorplanner.project.furnChoices",{});
+  const [floorLayer,setFloorLayer]=usePersistentState("floorplanner.project.floorLayer","rooms");
   const updateBoundary=(patch)=>setBrief(b=>({...b,boundary:{...b.boundary,...patch}}));
   const updateRoom=(type,patch)=>setBrief(b=>({...b,rooms:b.rooms.map(r=>r.type===type?{...r,...patch}:r)}));
   const upsertRoom=(id,type,patch)=>setBrief(b=>{
@@ -187,6 +189,8 @@ function ProjectWorkflow({onContinue}){
   const furnRooms=furnishing.results;
   const furnOk=furnRooms.filter(r=>r.status==="found"||r.status==="empty").length;
   const setFurnChoice=(roomId,presetId)=>setFurnChoices(c=>({...c,[roomId]:presetId}));
+  const floorLayers=useMemo(()=>champion?deriveFloorLayers(champion):null,[champion]);
+  const activeLayer=furnishOn?"rooms":floorLayer;
   const maleWc=projectRoom("wc-men","wc","male");
   const femaleWc=projectRoom("wc-women","wc","female");
   const unisexWc=projectRoom("wc-unisex","wc","unisex");
@@ -241,9 +245,25 @@ function ProjectWorkflow({onContinue}){
         <div className={"floorBest"+(furnishOn?" furnished":"")}>
           <div className="floorHead">
             <b>{furnishOn?"Opremljena etaža (Korak F)":"Trenutno najboljša etaža"}</b>
-            <button className={"furnToggle"+(furnishOn?" on":"")} onClick={()=>setFurnishOn(v=>!v)}>{furnishOn?"◧ nazaj na tloris":"⊞ opremi celo etažo"}</button>
+            <div className="floorHeadTools">
+              {!furnishOn&&<span className="layerSwitch">
+                {[["rooms","Prostori"],["zones","Cone"],["flows","Tokovi"]].map(([id,lbl])=>
+                  <button key={id} className={floorLayer===id?"on":""} onClick={()=>setFloorLayer(id)}>{lbl}</button>)}
+              </span>}
+              <button className={"furnToggle"+(furnishOn?" on":"")} onClick={()=>setFurnishOn(v=>!v)}>{furnishOn?"◧ nazaj na tloris":"⊞ opremi celo etažo"}</button>
+            </div>
           </div>
-          {champion&&<FloorSvg layout={champion} floorItems={furnishOn?furnishing.items:null}/>}
+          {champion&&<FloorSvg layout={champion} floorItems={furnishOn?furnishing.items:null} layer={activeLayer} layers={floorLayers}/>}
+          {!furnishOn&&activeLayer==="zones"&&<div className="furnBar">
+            <span className="furnLegend">
+              {ZONE_DEFS.filter(z=>Object.values(floorLayers?.zoneByRoom||{}).includes(z.id)).map(z=>
+                <span key={z.id}><i style={{background:z.fill}}/>{z.label}</span>)}
+            </span>
+          </div>}
+          {!furnishOn&&activeLayer==="flows"&&<div className="furnBar">
+            <span className="furnLegend">{(floorLayers?.flows||[]).map(f=><span key={f.kind}><i style={{background:f.color}}/>{f.label}</span>)}</span>
+            <span className="furnBadge">tok skozi hodniško hrbtenico (vhod → hodnik → prostori)</span>
+          </div>}
           {furnishOn&&<div className="furnBar">
             <span className={"furnBadge"+(furnOk===furnRooms.length?" ok":"")}>{furnOk}/{furnRooms.length} prostorov opremljenih</span>
             <span className="furnLegend">
@@ -291,7 +311,7 @@ function ProjectWorkflow({onContinue}){
   </div>;
 }
 
-function FloorSvg({layout,floorItems}){
+function FloorSvg({layout,floorItems,layer="rooms",layers=null}){
   const W=layout.boundary.width, D=layout.boundary.depth;
   const pad=clamp(Math.max(W,D)*0.04,0.6,2);
   const fontSize=clamp(Math.max(W,D)*0.018,0.28,1.1);
@@ -299,16 +319,23 @@ function FloorSvg({layout,floorItems}){
   const vb=`0 0 ${W+pad*2} ${D+pad*2}`;
   const rooms=[...layout.rooms,layout.corridor,...(layout.corridorLinks||[])];
   const hasFurn=Array.isArray(floorItems)&&floorItems.length>0;
+  const zoneView=layer==="zones"&&layers;
+  const flowView=layer==="flows"&&layers;
+  const roomFill=(r)=>zoneView?zoneFill(layers.zoneByRoom[r.id]||"other"):roomColor(r.type);
   return <svg className="floorSvg" viewBox={vb} role="img">
     <rect x={pad} y={pad} width={W} height={D} fill="#f6f7f3" stroke="#2b3138" strokeWidth={strokeWidth}/>
     {rooms.map(r=><g key={r.id}>
-      <rect x={pad+r.x} y={pad+r.y} width={r.w} height={r.d} fill={roomColor(r.type)} stroke={r.type==="corridor"?"#8a6d19":"#22313a"} strokeWidth={r.type==="corridor"?strokeWidth*1.5:strokeWidth}/>
+      <rect x={pad+r.x} y={pad+r.y} width={r.w} height={r.d} fill={roomFill(r)} opacity={flowView&&r.type!=="corridor"?0.5:1} stroke={r.type==="corridor"?"#8a6d19":"#22313a"} strokeWidth={r.type==="corridor"?strokeWidth*1.5:strokeWidth}/>
       {!(hasFurn&&r.type!=="corridor")&&<text x={pad+r.x+r.w/2} y={pad+r.y+r.d/2} textAnchor="middle" dominantBaseline="middle" fontSize={roomLabelSize(r,fontSize)} fontWeight={r.type==="wc"?"700":"400"} fill="#10161b">{roomLabel(r)}</text>}
-      {!hasFurn&&r.doorToCorridor&&<rect x={pad+r.x+r.w/2-0.35} y={pad+r.y-strokeWidth} width="0.7" height={strokeWidth*2} fill="#e2553f"/>}
+      {!hasFurn&&!flowView&&r.doorToCorridor&&<rect x={pad+r.x+r.w/2-0.35} y={pad+r.y-strokeWidth} width="0.7" height={strokeWidth*2} fill="#e2553f"/>}
     </g>)}
     {hasFurn&&floorItems.map((it,i)=>it.kind==="door"
       ? <rect key={"fi"+i} x={pad+it.x} y={pad+it.y} width={it.w} height={it.h} fill="#e2553f"/>
       : <rect key={"fi"+i} x={pad+it.x} y={pad+it.y} width={it.w} height={it.h} fill={furnFill(it.category)} stroke={furnStroke(it.category)} strokeWidth={strokeWidth*0.8}/>)}
+    {flowView&&layers.flows.map((fl,fi)=><g key={"fl"+fi}>
+      {fl.polylines.map((pl,pi)=><polyline key={pi} points={pl.map(p=>`${pad+p.x},${pad+p.y}`).join(" ")} fill="none" stroke={fl.color} strokeWidth={strokeWidth*2.4} strokeLinecap="round" strokeLinejoin="round" opacity="0.85"/>)}
+      {fl.polylines.map((pl,pi)=><circle key={"c"+pi} cx={pad+pl[0].x} cy={pad+pl[0].y} r={strokeWidth*2.2} fill={fl.color}/>)}
+    </g>)}
     {(layout.entrances||[]).map(e=><EntranceMark key={e.id} entry={e} pad={pad} W={W} D={D}/>)}
   </svg>;
 }
@@ -1676,6 +1703,8 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .metricStack{display:grid;gap:6px;font-size:10.5px;color:var(--mut);margin-top:10px}.floorBtns{margin:0;grid-template-columns:1fr 1fr 1fr auto}
 .roomPick{display:grid;gap:6px;margin-top:8px}.roomPick button{display:flex;justify-content:space-between;gap:8px;align-items:center;text-align:left;background:var(--p2);border:1px solid var(--bd);color:var(--tx);border-radius:7px;padding:8px 9px;cursor:pointer}.roomPick button.on{border-color:var(--cy);background:#0e2626}.roomPick span{color:var(--mut);font-size:10px}
 .aiPromptView summary{cursor:pointer;color:var(--mut);font-size:11px}.aiPromptView pre{background:var(--bg);border:1px solid var(--bd);border-radius:7px;padding:9px;font-size:10.5px;white-space:pre-wrap;max-height:220px;overflow:auto;margin-top:6px}
+.floorHeadTools{display:flex;align-items:center;gap:8px}
+.layerSwitch{display:inline-flex;border:1px solid var(--bd);border-radius:7px;overflow:hidden}.layerSwitch button{background:var(--p2);border:0;border-right:1px solid var(--bd);color:var(--mut);padding:4px 9px;font-size:11px;cursor:pointer}.layerSwitch button:last-child{border-right:0}.layerSwitch button.on{background:#0e2626;color:#7fdede}
 .floorBest.furnished{max-width:960px}.floorBest.furnished .floorSvg{height:440px}
 .furnToggle{background:var(--p2);border:1px solid var(--bd);color:var(--tx);border-radius:7px;padding:4px 9px;font-size:11px;cursor:pointer}.furnToggle.on{border-color:var(--cy);background:#0e2626;color:#7fdede}
 .furnBar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 10px;border-top:1px solid var(--bd);font-size:10.5px;color:var(--mut)}

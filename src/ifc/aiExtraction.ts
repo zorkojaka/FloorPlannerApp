@@ -17,15 +17,16 @@ Vrni SAMO veljaven JSON (brez razlage) v tej obliki — enote v MILIMETRIH:
     { "sourceId": "c1", "name": "Glavni hodnik", "role": "main", "width": 1800 }
   ],
   "rooms": [
-    { "sourceId": "r1", "name": "Pisarna 1", "roomType": "office", "w": 4200, "d": 5000 },
-    { "sourceId": "r2", "name": "WC moški",   "roomType": "wc", "wcKind": "male",   "w": 2400, "d": 2200 },
-    { "sourceId": "r3", "name": "WC ženski",  "roomType": "wc", "wcKind": "female", "w": 2400, "d": 2200 }
+    { "sourceId": "r1", "name": "Pisarna 1", "roomType": "office", "zone": "work",     "w": 4200, "d": 5000 },
+    { "sourceId": "r2", "name": "WC moški",   "roomType": "wc", "wcKind": "male",   "zone": "sanitary", "w": 2400, "d": 2200 },
+    { "sourceId": "r3", "name": "WC ženski",  "roomType": "wc", "wcKind": "female", "zone": "sanitary", "w": 2400, "d": 2200 }
   ]
 }
 
 Pravila:
 - roomType je eno od: "office", "wc". Hodnike daj v "corridors", NE med "rooms".
 - wcKind (samo za WC) je eno od: "male", "female", "unisex". Če ni jasno, izpusti (velja unisex).
+- zone (neobvezno) je namembnostna/čistostna cona: "work", "sanitary", "service", "technical". Če ni jasno, izpusti.
 - corridors.role je "main" (širša hrbtenica) ali "side" (ožji povezovalni hodnik).
 - w = širina, d = globina prostora v mm. Če meri ni, oceni iz merila/legende.
 - Ne izmišljaj prostorov, ki jih na načrtu ni. Vključi vse čitljive prostore.`;
@@ -74,6 +75,7 @@ export function parseAiExtractedPlan(input: string | unknown): NormalizedIfcPlan
       name: String(room.name || `Prostor ${index + 1}`),
       roomType,
       wcKind: roomType === 'wc' ? wcKindRaw : undefined,
+      zone: room.zone ? String(room.zone) : undefined,
       w: Math.round(num(room.w, `rooms[${index}].w`)),
       d: Math.round(num(room.d, `rooms[${index}].d`)),
       elements: [],

@@ -19,6 +19,8 @@ export interface NormalizedIfcRoom {
   name: string;
   roomType: RoomType;
   wcKind?: WcKind;
+  /** GMP cona (namembnost/čistost) — resnica iz uvoza, če je na voljo */
+  zone?: string;
   w: number;
   d: number;
   elements: NormalizedIfcElement[];
