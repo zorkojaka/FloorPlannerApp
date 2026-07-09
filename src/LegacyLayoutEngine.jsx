@@ -148,6 +148,7 @@ function ProjectWorkflow({onContinue}){
   const [furnishOn,setFurnishOn]=usePersistentState("floorplanner.project.furnishOn",false);
   const [furnChoices,setFurnChoices]=usePersistentState("floorplanner.project.furnChoices",{});
   const [floorLayer,setFloorLayer]=usePersistentState("floorplanner.project.floorLayer","rooms");
+  const [flowKind,setFlowKind]=usePersistentState("floorplanner.project.flowKind","all");
   const updateBoundary=(patch)=>setBrief(b=>({...b,boundary:{...b.boundary,...patch}}));
   const updateRoom=(type,patch)=>setBrief(b=>({...b,rooms:b.rooms.map(r=>r.type===type?{...r,...patch}:r)}));
   const upsertRoom=(id,type,patch)=>setBrief(b=>{
@@ -191,6 +192,10 @@ function ProjectWorkflow({onContinue}){
   const setFurnChoice=(roomId,presetId)=>setFurnChoices(c=>({...c,[roomId]:presetId}));
   const floorLayers=useMemo(()=>champion?deriveFloorLayers(champion):null,[champion]);
   const activeLayer=furnishOn?"rooms":floorLayer;
+  const floorLayersView=useMemo(()=>{
+    if(!floorLayers||activeLayer!=="flows"||flowKind==="all") return floorLayers;
+    return {...floorLayers,flows:floorLayers.flows.filter(f=>f.kind===flowKind)};
+  },[floorLayers,activeLayer,flowKind]);
   const maleWc=projectRoom("wc-men","wc","male");
   const femaleWc=projectRoom("wc-women","wc","female");
   const unisexWc=projectRoom("wc-unisex","wc","unisex");
@@ -253,7 +258,7 @@ function ProjectWorkflow({onContinue}){
               <button className={"furnToggle"+(furnishOn?" on":"")} onClick={()=>setFurnishOn(v=>!v)}>{furnishOn?"◧ nazaj na tloris":"⊞ opremi celo etažo"}</button>
             </div>
           </div>
-          {champion&&<FloorSvg layout={champion} floorItems={furnishOn?furnishing.items:null} layer={activeLayer} layers={floorLayers}/>}
+          {champion&&<FloorSvg layout={champion} floorItems={furnishOn?furnishing.items:null} layer={activeLayer} layers={activeLayer==="flows"?floorLayersView:floorLayers}/>}
           {!furnishOn&&activeLayer==="zones"&&<div className="furnBar">
             <span className="furnLegend">
               {ZONE_DEFS.filter(z=>Object.values(floorLayers?.zoneByRoom||{}).includes(z.id)).map(z=>
@@ -261,8 +266,12 @@ function ProjectWorkflow({onContinue}){
             </span>
           </div>}
           {!furnishOn&&activeLayer==="flows"&&<div className="furnBar">
-            <span className="furnLegend">{(floorLayers?.flows||[]).map(f=><span key={f.kind}><i style={{background:f.color}}/>{f.label}</span>)}</span>
-            <span className="furnBadge">tok skozi hodniško hrbtenico (vhod → hodnik → prostori)</span>
+            <span className="layerSwitch">
+              {[["all","Vse"],["people","Ljudje"],["material","Material"],["waste","Odpadki"]].map(([id,lbl])=>
+                <button key={id} className={flowKind===id?"on":""} onClick={()=>setFlowKind(id)}>{lbl}</button>)}
+            </span>
+            <span className="furnLegend">{(floorLayersView?.flows||[]).map(f=><span key={f.kind}><i style={{background:f.color}}/>{f.label}</span>)}</span>
+            <span className="furnBadge">GMP ločevanje: ljudje po sredini, material in odpadki po ločenih sledeh (odpadki na nasprotni izhod)</span>
           </div>}
           {furnishOn&&<div className="furnBar">
             <span className={"furnBadge"+(furnOk===furnRooms.length?" ok":"")}>{furnOk}/{furnRooms.length} prostorov opremljenih</span>

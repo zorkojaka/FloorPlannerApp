@@ -28,15 +28,21 @@ describe('roomZone', () => {
 });
 
 describe('deriveFloorLayers', () => {
-  it('vrne cone za vse prostore in tok ljudi', () => {
+  it('vrne cone za vse prostore in tokove ljudje/material/odpadki', () => {
     const layout = generateStripFloorLayout(BRIEF, {});
     const layers = deriveFloorLayers(layout);
     const allRooms = [...layout.rooms, layout.corridor, ...(layout.corridorLinks || [])];
     for (const room of allRooms) expect(layers.zoneByRoom[room.id]).toBeTruthy();
-    expect(layers.flows).toHaveLength(1);
-    expect(layers.flows[0].kind).toBe('people');
+    const kinds = layers.flows.map((flow) => flow.kind);
+    expect(kinds).toContain('people');
+    expect(kinds).toContain('material');
+    expect(kinds).toContain('waste');
+    const people = layers.flows.find((flow) => flow.kind === 'people')!;
     // hrbtenica + vhodni krak + krak na prostor
-    expect(layers.flows[0].polylines.length).toBeGreaterThanOrEqual(2);
-    for (const pl of layers.flows[0].polylines) expect(pl.length).toBeGreaterThanOrEqual(2);
+    expect(people.polylines.length).toBeGreaterThanOrEqual(2);
+    for (const flow of layers.flows) for (const pl of flow.polylines) expect(pl.length).toBeGreaterThanOrEqual(2);
+    // odpadki tečejo po ločeni sledi (druga cross-koordinata kot ljudje)
+    const waste = layers.flows.find((flow) => flow.kind === 'waste')!;
+    expect(waste.polylines[0][0].y).not.toBe(people.polylines[0][0].y);
   });
 });
