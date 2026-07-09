@@ -1,5 +1,12 @@
 # Stavba · PoC — gnezdenje (Oreh 2)
 
+> **⚠️ UPOKOJENO (2026-07-09).** Koda te demo poti (`src/building/`, App način
+> »Stavba PoC«) je odstranjena. Vsa vrednost je prenesena na **project hrbtenico**
+> (`src/project/` + `src/ifc/`): uvoz IFC/AI → indukcija strategije in con →
+> generator → A/B izostritev → oprema cele etaže → plasti (prostori/cone/tokovi).
+> Stavba (Oreh 2) je zdaj faza »projekt« znotraj glavnega engine-a. Ta dokument
+> ostaja kot zapis izvornega koncepta in večplastne sheme, ki je usmerila project linijo.
+
 > Demo potrditev koncepta: iz referenčnih načrtov (pisarne + WC + hodniki) se
 > inducirajo pravila, deterministični generator nato postavlja sobe v **drugačno**
 > stavbo (druga kvadratura, drug vhod, druga števila sob), uporabnik z A/B
