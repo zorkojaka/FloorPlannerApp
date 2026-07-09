@@ -1,6 +1,19 @@
 export type RoomType = 'wc' | 'office' | 'corridor';
 export type WcKind = 'male' | 'female' | 'unisex';
 
+/** Namembnostna/čistostna cona (korak k GMP conam). Domači domenski tip. */
+export type ZoneId = 'work' | 'sanitary' | 'circulation' | 'service' | 'technical' | 'other';
+export const ZONE_IDS: ZoneId[] = ['work', 'sanitary', 'circulation', 'service', 'technical', 'other'];
+
+/** Cona prostora: spoštuje eksplicitno oznako (npr. iz uvoza), sicer izpelje iz tipa. */
+export function zoneFromType(type: RoomType, explicit?: string): ZoneId {
+  if (explicit && (ZONE_IDS as string[]).includes(explicit)) return explicit as ZoneId;
+  if (type === 'corridor') return 'circulation';
+  if (type === 'wc') return 'sanitary';
+  if (type === 'office') return 'work';
+  return 'other';
+}
+
 export interface RoomTypeDefinition {
   type: RoomType;
   name: string;
@@ -20,6 +33,8 @@ export interface RoomProgram {
   wcKind?: WcKind;
   workstations?: number;
   areaOverride?: number;
+  /** cona, izpeljana iz uvoza (indukcija) — sicer se sklepa iz tipa */
+  zone?: ZoneId;
 }
 
 export interface ProjectBoundary {

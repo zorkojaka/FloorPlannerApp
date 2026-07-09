@@ -1,10 +1,12 @@
-import type { FloorLayout } from './floorGenerator';
+import type { FloorLayout, PlacedRoom } from './floorGenerator';
+import { zoneFromType, type ZoneId } from './roomTypes';
 
 export interface FloorPreferenceWeights {
   compactness: number;
   corridorEfficiency: number;
   wetGrouping: number;
   officeFrontage: number;
+  zoneContiguity: number;
 }
 
 export interface FloorPreferenceState {
@@ -14,10 +16,11 @@ export interface FloorPreferenceState {
 }
 
 export const DEFAULT_FLOOR_WEIGHTS: FloorPreferenceWeights = {
-  compactness: 0.25,
-  corridorEfficiency: 0.25,
-  wetGrouping: 0.25,
-  officeFrontage: 0.25,
+  compactness: 0.2,
+  corridorEfficiency: 0.2,
+  wetGrouping: 0.2,
+  officeFrontage: 0.2,
+  zoneContiguity: 0.2,
 };
 
 export function initialFloorPreferenceState(): FloorPreferenceState {
@@ -33,11 +36,13 @@ export function scoreFloorLayout(layout: FloorLayout, weights: FloorPreferenceWe
   const corridorEfficiency = clamp01(1 - corridorArea / Math.max(usedArea, 1));
   const wetGrouping = wetGroupingScore(layout);
   const officeFrontage = officeFrontageScore(layout);
+  const zoneContiguity = zoneContiguityScore(layout);
   return overflow * (
     compactness * weights.compactness +
     corridorEfficiency * weights.corridorEfficiency +
     wetGrouping * weights.wetGrouping +
-    officeFrontage * weights.officeFrontage
+    officeFrontage * weights.officeFrontage +
+    zoneContiguity * weights.zoneContiguity
   );
 }
 
@@ -70,7 +75,44 @@ export function floorSignals(layout: FloorLayout): FloorPreferenceWeights {
     corridorEfficiency: clamp01(1 - corridorArea / Math.max(usedArea, 1)),
     wetGrouping: wetGroupingScore(layout),
     officeFrontage: officeFrontageScore(layout),
+    zoneContiguity: zoneContiguityScore(layout),
   };
+}
+
+/**
+ * A/B signal indukcije con: nagradi razporeditve, kjer sosednji prostori vzdolž
+ * hodnika delijo isto cono (GMP ločevanje). Prostore razvrsti po strani hodnika in
+ * vzdolžni osi ter meri delež sosednjih parov z enako cono.
+ */
+export function zoneContiguity(layout: FloorLayout): number {
+  return zoneContiguityScore(layout);
+}
+
+function zoneContiguityScore(layout: FloorLayout): number {
+  const rooms = layout.rooms.filter((room) => room.type !== 'corridor');
+  if (rooms.length < 2) return 1;
+  const corridor = layout.corridor;
+  const horizontal = corridor.w >= corridor.d;
+  const corridorCross = horizontal ? corridor.y + corridor.d / 2 : corridor.x + corridor.w / 2;
+  const sides: PlacedRoom[][] = [[], []];
+  for (const room of rooms) {
+    const cross = horizontal ? room.y + room.d / 2 : room.x + room.w / 2;
+    sides[cross < corridorCross ? 0 : 1].push(room);
+  }
+  let adjacent = 0;
+  let same = 0;
+  for (const side of sides) {
+    side.sort((a, b) => (horizontal ? a.x - b.x : a.y - b.y));
+    for (let i = 1; i < side.length; i++) {
+      adjacent++;
+      if (zoneOf(side[i - 1]) === zoneOf(side[i])) same++;
+    }
+  }
+  return adjacent ? same / adjacent : 1;
+}
+
+function zoneOf(room: PlacedRoom): ZoneId {
+  return room.zone ?? zoneFromType(room.type);
 }
 
 function wetGroupingScore(layout: FloorLayout): number {

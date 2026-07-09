@@ -7,8 +7,9 @@
  */
 
 import type { FloorLayout, PlacedRoom } from './floorGenerator';
+import { zoneFromType, type ZoneId } from './roomTypes';
 
-export type ZoneId = 'work' | 'sanitary' | 'circulation' | 'service' | 'technical' | 'other';
+export type { ZoneId };
 
 export interface ZoneDef {
   id: ZoneId;
@@ -35,11 +36,7 @@ export function zoneLabel(zone: ZoneId): string {
 
 /** Cona prostora — spoštuje eksplicitno oznako, sicer izpelje iz tipa. */
 export function roomZone(room: PlacedRoom & { zone?: string }): ZoneId {
-  if (room.zone && ZONE_DEFS.some((def) => def.id === room.zone)) return room.zone as ZoneId;
-  if (room.type === 'corridor') return 'circulation';
-  if (room.type === 'wc') return 'sanitary';
-  if (room.type === 'office') return 'work';
-  return 'other';
+  return zoneFromType(room.type, room.zone);
 }
 
 export interface FloorFlow {

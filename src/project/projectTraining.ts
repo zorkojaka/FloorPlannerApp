@@ -1,13 +1,17 @@
 import { extractFloorStrategyObservations, induceFloorStrategyProfile, type FloorStrategyProfile } from '../ifc/floorStrategy';
 import type { NormalizedIfcPlan } from '../ifc/normalizedPlan';
 import type { IfcReferenceSummary } from '../training/ifcReferenceSets';
-import type { ProjectBrief, RoomProgram, WcKind } from './roomTypes';
+import type { ProjectBrief, RoomProgram, RoomType, WcKind } from './roomTypes';
+import { induceZoneProfile, type ZoneProfile, type ZoneStat } from './zoneInduction';
 
 export interface ProjectTrainingResult {
   sourceId: string;
   name: string;
   brief: ProjectBrief;
   profile: FloorStrategyProfile;
+  /** iz uvoza izpeljane cone (namembnost/čistost) — vpliv na generator + A/B */
+  zones: ZoneStat[];
+  zoneSource: ZoneProfile['source'];
   evidence: {
     rooms: number;
     corridors: number;
@@ -38,8 +42,14 @@ interface TrainingInput {
   plan: NormalizedIfcPlan;
 }
 
+/** Cona za program: naučena preslikava iz uvoza, sicer sklepana iz tipa. */
+function programZone(type: RoomType, zoneProfile: ZoneProfile): RoomProgram['zone'] {
+  return zoneProfile.zoneByType[type];
+}
+
 /** Skupno jedro: iz normaliziranega vhoda sestavi brief + profil + dokaz. */
 function assembleProjectTraining(input: TrainingInput): ProjectTrainingResult {
+  const zoneProfile = induceZoneProfile(input.plan);
   const wcTotal = input.maleCount + input.femaleCount + input.unisexCount;
   const programArea = input.officeCount * input.averageOfficeArea + wcTotal * input.averageWcArea;
   const corridorArea = Math.max(programArea * 0.18, input.corridorsCount * (input.mainCorridorMm / 1000) * 8);
@@ -49,11 +59,11 @@ function assembleProjectTraining(input: TrainingInput): ProjectTrainingResult {
   const width = round1(Math.min(120, Math.max(8, minimumFrontage, Math.sqrt(targetArea * aspect))));
   const depth = round1(Math.max(6, targetArea / width));
   const roomCandidates: RoomProgram[] = [
-    wcProgram('wc-men', 'male', input.maleCount),
-    wcProgram('wc-women', 'female', input.femaleCount),
-    wcProgram('wc-unisex', 'unisex', input.unisexCount),
-    { id: 'office', type: 'office', count: input.officeCount, workstations: 1, areaOverride: round1(input.averageOfficeArea) },
-    { id: 'corridor', type: 'corridor', count: 1 },
+    wcProgram('wc-men', 'male', input.maleCount, zoneProfile),
+    wcProgram('wc-women', 'female', input.femaleCount, zoneProfile),
+    wcProgram('wc-unisex', 'unisex', input.unisexCount, zoneProfile),
+    { id: 'office', type: 'office', count: input.officeCount, workstations: 1, areaOverride: round1(input.averageOfficeArea), zone: programZone('office', zoneProfile) },
+    { id: 'corridor', type: 'corridor', count: 1, zone: programZone('corridor', zoneProfile) },
   ];
   const rooms = roomCandidates.filter((room) => room.type === 'corridor' || room.count > 0);
 
@@ -73,6 +83,8 @@ function assembleProjectTraining(input: TrainingInput): ProjectTrainingResult {
       rooms,
     },
     profile: induceFloorStrategyProfile(input.name, extractFloorStrategyObservations(input.plan)),
+    zones: zoneProfile.stats,
+    zoneSource: zoneProfile.source,
     evidence: {
       rooms: input.roomsCount,
       corridors: input.corridorsCount,
@@ -170,8 +182,8 @@ function normalizedPlanFromSummary(summary: IfcReferenceSummary): NormalizedIfcP
   };
 }
 
-function wcProgram(id: string, wcKind: WcKind, count: number): RoomProgram {
-  return { id, type: 'wc', wcKind, count, areaOverride: wcKind === 'male' ? 3.8 : 3.2 };
+function wcProgram(id: string, wcKind: WcKind, count: number, zoneProfile: ZoneProfile): RoomProgram {
+  return { id, type: 'wc', wcKind, count, areaOverride: wcKind === 'male' ? 3.8 : 3.2, zone: programZone('wc', zoneProfile) };
 }
 
 function averageArea(rooms: Array<{ w: number; d: number }>, fallback: number): number {

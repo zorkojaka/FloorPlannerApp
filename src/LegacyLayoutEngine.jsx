@@ -373,7 +373,7 @@ function roomLabel(room){
 function roomLabelSize(room,fontSize){
   return room.type==="wc"?fontSize*1.8:fontSize;
 }
-function floorWeightLabel(key){return ({compactness:"izraba",corridorEfficiency:"hodnik",wetGrouping:"mokri sklop",officeFrontage:"pisarne/okna"})[key]||key;}
+function floorWeightLabel(key){return ({compactness:"izraba",corridorEfficiency:"hodnik",wetGrouping:"mokri sklop",officeFrontage:"pisarne/okna",zoneContiguity:"cone skupaj"})[key]||key;}
 function round1(v){return Math.round(v*10)/10;}
 function makeStrategyProfile(kind){
   const plan=kind==="dispersed"
@@ -482,7 +482,8 @@ function O9({library,setLibrary,onOpenProject}){
     saveJson(typeof window==="undefined"?undefined:window.localStorage,"floorplanner.project.brief",training.brief);
     saveJson(typeof window==="undefined"?undefined:window.localStorage,"floorplanner.project.strategyProfile",training.profile);
     saveJson(typeof window==="undefined"?undefined:window.localStorage,"floorplanner.project.pairIndex",0);
-    setTrainingStatus(`${training.name}: ${training.evidence.rooms} sob, ${training.evidence.wc} WC, ${training.evidence.office} pisarn, hodnik ${training.evidence.mainCorridorMm} mm`);
+    const zoneNote=training.zones?.length?` · cone (${training.zoneSource==="import"?"iz uvoza":"sklepane"}): ${training.zones.map(z=>`${zoneLabel(z.zone)} ${Math.round(z.areaShare*100)} %`).join(", ")}`:"";
+    setTrainingStatus(`${training.name}: ${training.evidence.rooms} sob, ${training.evidence.wc} WC, ${training.evidence.office} pisarn, hodnik ${training.evidence.mainCorridorMm} mm${zoneNote}`);
     onOpenProject?.();
   };
   const applyProjectTraining=(summary)=>applyTraining(projectTrainingFromIfcSummary(summary));

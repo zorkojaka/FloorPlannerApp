@@ -1,4 +1,4 @@
-import { estimateProjectArea, estimateRoomProgramArea, ROOM_TYPE_DEFINITIONS, type CorridorPolicy, type ProjectBrief, type ProjectEntrance, type RoomProgram, type RoomType, type WcKind } from './roomTypes';
+import { estimateProjectArea, estimateRoomProgramArea, ROOM_TYPE_DEFINITIONS, zoneFromType, ZONE_IDS, type CorridorPolicy, type ProjectBrief, type ProjectEntrance, type RoomProgram, type RoomType, type WcKind, type ZoneId } from './roomTypes';
 
 export interface PlacedRoom {
   id: string;
@@ -12,6 +12,8 @@ export interface PlacedRoom {
   d: number;
   area: number;
   doorToCorridor: boolean;
+  /** namembnostna/čistostna cona (iz uvoza ali sklepana iz tipa) */
+  zone?: ZoneId;
 }
 
 export interface FloorLayout {
@@ -36,7 +38,7 @@ export interface FloorLayoutOptions {
   id?: string;
   corridorWidth?: number;
   corridorSide?: 'north' | 'south' | 'west' | 'east';
-  roomOrder?: 'program' | 'reverse' | 'offices-first' | 'wc-first' | 'alternating' | 'spread-wc';
+  roomOrder?: 'program' | 'reverse' | 'offices-first' | 'wc-first' | 'alternating' | 'spread-wc' | 'zone-cluster';
   internalCorridors?: 'none' | 'center-cross' | 'thirds';
 }
 
@@ -82,12 +84,25 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
   const frontageLimit = verticalCorridor ? boundary.depth : boundary.width;
   const sidePlans: RoomPlan[][] = [[], []];
   const sideFrontage = [0, 0];
+  // v načinu 'zone-cluster' držimo cono na isti strani hodnika (GMP ločevanje)
+  const zoneSideMode = roomOrder === 'zone-cluster';
+  const lastSideForZone = new Map<ZoneId, number>();
 
   for (const program of orderPrograms(expandPrograms(brief.rooms), roomOrder)) {
     const definition = ROOM_TYPE_DEFINITIONS[program.type];
     if (!definition || program.type === 'corridor') continue;
     const targetArea = estimateRoomProgramArea({ ...program, count: 1 });
-    const sideIndex = sideFrontage[0] <= sideFrontage[1] ? 0 : 1;
+    let sideIndex = sideFrontage[0] <= sideFrontage[1] ? 0 : 1;
+    if (zoneSideMode) {
+      const zone = program.zone ?? zoneFromType(program.type);
+      const preferred = lastSideForZone.get(zone);
+      if (preferred !== undefined) {
+        const prefDepth = Math.max(definition.minDepth, sideDepths[preferred]);
+        const prefFrontage = minimumFrontageForProgram(program, targetArea, prefDepth);
+        if (sideFrontage[preferred] + prefFrontage <= frontageLimit) sideIndex = preferred;
+      }
+      lastSideForZone.set(zone, sideIndex);
+    }
     const maxDepth = Math.max(definition.minDepth, sideDepths[sideIndex]);
     const frontage = minimumFrontageForProgram(program, targetArea, maxDepth);
     sidePlans[sideIndex].push({ program, frontage });
@@ -119,6 +134,7 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
         d: depth,
         area,
         doorToCorridor: definition.corridorAccess === 'required',
+        zone: plan.program.zone ?? zoneFromType(plan.program.type),
       });
       cursor += frontage;
     }
@@ -152,7 +168,7 @@ export function generateFloorLayoutPool(brief: ProjectBrief): FloorLayout[] {
         }
       }
     }
-    for (const roomOrder of ['alternating', 'spread-wc'] as const) {
+    for (const roomOrder of ['alternating', 'spread-wc', 'zone-cluster'] as const) {
       const corridorWidth = normalizeCorridorPolicy(brief).mainWidth;
       for (const internalCorridors of ['none', 'center-cross'] as const) {
         variants.push({ corridorSide, roomOrder, corridorWidth, internalCorridors, id: `${corridorSide}-${roomOrder}-${corridorWidth}-${internalCorridors}` });
@@ -312,7 +328,15 @@ function orderPrograms(programs: RoomProgram[], order: FloorLayoutOptions['roomO
   if (order === 'wc-first') return [...nonCorridors].sort((a, b) => Number(b.type === 'wc') - Number(a.type === 'wc'));
   if (order === 'alternating') return interleaveByType(nonCorridors);
   if (order === 'spread-wc') return spreadWetRooms(nonCorridors);
+  if (order === 'zone-cluster') return clusterByZone(nonCorridors);
   return nonCorridors;
+}
+
+/** GMP načelo: prostore iste cone drži skupaj (stabilno znotraj cone, cone po ZONE_IDS). */
+function clusterByZone(programs: RoomProgram[]): RoomProgram[] {
+  const zoneOf = (program: RoomProgram): ZoneId => program.zone ?? zoneFromType(program.type);
+  const order = new Map(ZONE_IDS.map((zone, index) => [zone, index]));
+  return [...programs].sort((a, b) => (order.get(zoneOf(a)) ?? 99) - (order.get(zoneOf(b)) ?? 99));
 }
 
 function interleaveByType(programs: RoomProgram[]): RoomProgram[] {
