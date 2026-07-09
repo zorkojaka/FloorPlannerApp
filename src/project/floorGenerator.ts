@@ -167,10 +167,15 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
       const runLen = end - start;
       const total = bucketLen[bi];
       if (total > runLen + 0.05) warnings.push('Rooms exceed available frontage along the corridor.');
-      const scale = total > 0 && total < runLen ? Math.min(1.6, runLen / total) : 1;
+      // "več prostora je bolje": sobe zrastejo in zapolnijo vrsto (presežek pretežno v pisarne, WC omejen)
+      const widths = distributeWidths(buckets[bi].map((plan) => ({
+        min: plan.frontage,
+        max: maxWidthForType(plan.program.type, runLen),
+        weight: growthAppetite(plan.program.type),
+      })), runLen);
       let cursor = start;
-      for (const plan of buckets[bi]) {
-        const frontage = roundToGrid(plan.frontage * scale);
+      buckets[bi].forEach((plan, i) => {
+        const frontage = roundToGrid(widths[i]);
         const rect = toXY(cursor, row.b0, frontage, row.depth);
         rooms.push({
           id: `${plan.program.id}-${rooms.length + 1}`,
@@ -187,7 +192,7 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
           zone: plan.program.zone ?? zoneFromType(plan.program.type),
         });
         cursor += frontage;
-      }
+      });
     });
   });
 
@@ -228,6 +233,45 @@ function rectOverlapArea(a: PlacedRoom, b: PlacedRoom): number {
   const w = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
   const h = Math.max(0, Math.min(a.y + a.d, b.y + b.d) - Math.max(a.y, b.y));
   return w * h;
+}
+
+/** Rast prostora ob polnjenju vrste — pisarne rade zrastejo, WC malo. */
+function growthAppetite(type: RoomType): number {
+  if (type === 'office') return 1;
+  if (type === 'wc') return 0.15;
+  return 0.5;
+}
+
+/** Zgornja meja širine prostora (da WC/servis ne naraste absurdno). */
+function maxWidthForType(type: RoomType, runLen: number): number {
+  const cap = type === 'wc' ? 3.6 : type === 'office' ? 9 : 6;
+  return Math.min(cap, runLen);
+}
+
+/**
+ * Razdeli dolžino vrste med sobe (water-filling): vsaka najprej dobi minimum,
+ * presežek pa se deli po apetitu do rasti in omeji z zgornjo mejo tipa. Če program
+ * presega vrsto, se sorazmerno skrči (overflow se poroča drugje).
+ */
+function distributeWidths(items: Array<{ min: number; max: number; weight: number }>, runLen: number): number[] {
+  if (!items.length) return [];
+  const minSum = items.reduce((sum, item) => sum + item.min, 0);
+  if (minSum >= runLen) return items.map((item) => (item.min / minSum) * runLen);
+  const widths = items.map((item) => item.min);
+  let slack = runLen - minSum;
+  for (let pass = 0; pass < 4 && slack > 0.01; pass++) {
+    const active = items.map((item, i) => (widths[i] < item.max - 0.01 ? i : -1)).filter((i) => i >= 0);
+    const weightSum = active.reduce((sum, i) => sum + items[i].weight, 0);
+    if (!active.length || weightSum <= 0) break;
+    let used = 0;
+    for (const i of active) {
+      const add = Math.min(items[i].max - widths[i], (slack * items[i].weight) / weightSum);
+      widths[i] += add;
+      used += add;
+    }
+    slack -= used;
+  }
+  return widths;
 }
 
 /** Se prostor dotika zunanjega zidu etaže (možno okno)? */
