@@ -134,10 +134,14 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
     };
     for (const program of programs) {
       const priority = ROOM_TYPE_DEFINITIONS[program.type].needsWindow ? [...windowRows, ...interiorRows] : [...interiorRows, ...windowRows];
-      const frontage = frontageOf(program, rows[priority[0] ?? 0]?.depth ?? plan.rowDepth);
-      const rowIndex = pickRow(frontage, priority);
+      const depth = rows[priority[0] ?? 0]?.depth ?? plan.rowDepth;
+      const frontage = frontageOf(program, depth);
+      // rezerviraj UDOBNO širino (ne min) → manj sob na vrsto, presežek se prelije v notranje
+      // vrste (jedro se zapolni), sobe pa zrastejo namesto da se stlačijo na fasado
+      const reserve = Math.max(frontage, comfortWidth(program.type, depth));
+      const rowIndex = pickRow(reserve, priority);
       rowPlans[rowIndex].push({ program, frontage });
-      rowRemaining[rowIndex] -= frontage;
+      rowRemaining[rowIndex] -= reserve;
     }
   } else {
     // privzeto: zaporedno polnjenje do povprečja (ohrani lokalnost reda → cone/WC dispergiranje delujeta)
@@ -235,6 +239,12 @@ function rectOverlapArea(a: PlacedRoom, b: PlacedRoom): number {
   return w * h;
 }
 
+/** Udobna (ciljna) širina prostora za rezervacijo pri window-aware razporeditvi. */
+function comfortWidth(type: RoomType, depth: number): number {
+  if (type === 'office') return clamp(depth * 0.9, 3.2, 6.5);
+  return 0; // WC/servis: brez dodatne rezervacije (uporabi minimum)
+}
+
 /** Rast prostora ob polnjenju vrste — pisarne rade zrastejo, WC malo. */
 function growthAppetite(type: RoomType): number {
   if (type === 'office') return 1;
@@ -242,16 +252,20 @@ function growthAppetite(type: RoomType): number {
   return 0.5;
 }
 
-/** Zgornja meja širine prostora (da WC/servis ne naraste absurdno). */
+/** Zgornja meja širine prostora. Pisarne so neomejene (absorbirajo presežek —
+ * večja pisarna je boljša), WC/servis omejena, da ne narasteta absurdno. */
 function maxWidthForType(type: RoomType, runLen: number): number {
-  const cap = type === 'wc' ? 3.6 : type === 'office' ? 9 : 6;
+  if (type === 'office') return runLen; // brez meje: pisarna raste, da zapolni prostor
+  const cap = type === 'wc' ? 3.6 : 6;
   return Math.min(cap, runLen);
 }
 
 /**
  * Razdeli dolžino vrste med sobe (water-filling): vsaka najprej dobi minimum,
- * presežek pa se deli po apetitu do rasti in omeji z zgornjo mejo tipa. Če program
- * presega vrsto, se sorazmerno skrči (overflow se poroča drugje).
+ * presežek pa se deli po apetitu do rasti in omeji z zgornjo mejo tipa (pisarne
+ * neomejene). Zaključni prehod ZAGOTOVI polno zapolnitev vrste (nič praznine):
+ * če po mejah ostane presežek (npr. vrsta samo z WC), ga sorazmerno razdeli vsem.
+ * Če program presega vrsto, se sorazmerno skrči (overflow se poroča drugje).
  */
 function distributeWidths(items: Array<{ min: number; max: number; weight: number }>, runLen: number): number[] {
   if (!items.length) return [];
@@ -270,6 +284,11 @@ function distributeWidths(items: Array<{ min: number; max: number; weight: numbe
       used += add;
     }
     slack -= used;
+  }
+  // zaključni prehod: preostali presežek (vse sobe na meji) razdeli sorazmerno → polna zapolnitev
+  if (slack > 0.01) {
+    const widthSum = widths.reduce((sum, w) => sum + w, 0) || 1;
+    for (let i = 0; i < widths.length; i++) widths[i] += (slack * widths[i]) / widthSum;
   }
   return widths;
 }
