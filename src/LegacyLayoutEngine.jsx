@@ -26,7 +26,8 @@ import { roomConstraintsFromPlacedRoom } from "./project/roomAdapter";
 import { furnishFloorLayout, FLOOR_FURN_PRESETS, defaultFloorPresetId } from "./project/floorFurnish";
 import { extractFloorStrategyObservations, induceFloorStrategyProfile, rankFloorLayoutsByProfile, scoreFloorLayoutByProfile } from "./ifc/floorStrategy";
 import { IFC_REFERENCE_SETS } from "./training/ifcReferenceSets";
-import { projectTrainingFromIfcSummary } from "./project/projectTraining";
+import { projectTrainingFromIfcSummary, projectTrainingFromNormalizedPlan } from "./project/projectTraining";
+import { AI_EXTRACTION_PROMPT, parseAiExtractedPlan } from "./ifc/aiExtraction";
 
 /* =========================================================================
    ZAKLENJEN SISTEM - harmonika orehov
@@ -446,14 +447,28 @@ function O9({library,setLibrary,onOpenProject}){
   const [metrics,setMetrics]=usePersistentState("floorplanner.o9.metrics",null);
   const [trainingStatus,setTrainingStatus]=useState("");
   const [err,setErr]=useState("");
+  const [aiRaw,setAiRaw]=usePersistentState("floorplanner.o9.aiPlan","");
+  const [aiErr,setAiErr]=useState("");
+  const [aiMsg,setAiMsg]=useState("");
   const loadPreset=(items)=>setRaw(JSON.stringify(items,null,2));
-  const applyProjectTraining=(summary)=>{
-    const training=projectTrainingFromIfcSummary(summary);
+  const applyTraining=(training)=>{
     saveJson(typeof window==="undefined"?undefined:window.localStorage,"floorplanner.project.brief",training.brief);
     saveJson(typeof window==="undefined"?undefined:window.localStorage,"floorplanner.project.strategyProfile",training.profile);
     saveJson(typeof window==="undefined"?undefined:window.localStorage,"floorplanner.project.pairIndex",0);
     setTrainingStatus(`${training.name}: ${training.evidence.rooms} sob, ${training.evidence.wc} WC, ${training.evidence.office} pisarn, hodnik ${training.evidence.mainCorridorMm} mm`);
     onOpenProject?.();
+  };
+  const applyProjectTraining=(summary)=>applyTraining(projectTrainingFromIfcSummary(summary));
+  const copyAiPrompt=async()=>{
+    try{await navigator.clipboard.writeText(AI_EXTRACTION_PROMPT);setAiMsg("Prompt skopiran — priloži mu sliko/PDF načrta v Claudu, vrnjeni JSON prilepi sem.");setAiErr("");}
+    catch{setAiMsg("Kopiranje ni uspelo — prompt je viden spodaj.");}
+  };
+  const importAiPlan=()=>{
+    try{
+      const plan=parseAiExtractedPlan(aiRaw);
+      applyTraining(projectTrainingFromNormalizedPlan(plan));
+      setAiErr("");setAiMsg(`Uvožen načrt "${plan.name}": ${plan.rooms.length} prostorov, ${(plan.corridors||[]).length} hodnikov → uporabljen v projektu.`);
+    }catch(e){setAiErr(e.message||String(e));}
   };
   const run=()=>{
     try{
@@ -488,6 +503,16 @@ function O9({library,setLibrary,onOpenProject}){
         })}
       </div>
       {trainingStatus&&<div className="softNote">Uporabljeno: {trainingStatus}</div>}
+      <div className="eyebrow">AI-ekstrakcija načrta (slika/PDF → JSON)</div>
+      <div className="softNote">Druga uvozna pot poleg IFC: realni tloris skozi AI-prompt v Claudu vrne strukturiran JSON, ki ga tu prilepiš. Napaja isto strateško indukcijo (WC gruča/razpršenost, širine hodnikov).</div>
+      <div className="presetRow">
+        <button onClick={copyAiPrompt}>📋 Kopiraj AI-prompt</button>
+      </div>
+      <textarea className="refBox" value={aiRaw} onChange={e=>setAiRaw(e.target.value)} placeholder='{"name":"...","corridors":[...],"rooms":[...]}' spellCheck="false"/>
+      <button className="regen" onClick={importAiPlan}>Uvozi in uporabi v projektu</button>
+      <details className="aiPromptView"><summary>AI-prompt (ogled)</summary><pre>{AI_EXTRACTION_PROMPT}</pre></details>
+      {aiMsg&&<div className="softNote">{aiMsg}</div>}
+      {aiErr&&<div className="warnNote">{aiErr}</div>}
       <div className="eyebrow">Reference JSON</div>
       <div className="presetRow">
         <button onClick={()=>loadPreset(CLASSIC_BATHROOM_REFS)}>Naloži klasične kopalnice</button>
@@ -1650,6 +1675,7 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .floorSignals .bad,.metricStack .bad{color:#f08a78;border-color:#7a3028}.metricStack .ok{color:#7fdede;border-color:#1f4444}
 .metricStack{display:grid;gap:6px;font-size:10.5px;color:var(--mut);margin-top:10px}.floorBtns{margin:0;grid-template-columns:1fr 1fr 1fr auto}
 .roomPick{display:grid;gap:6px;margin-top:8px}.roomPick button{display:flex;justify-content:space-between;gap:8px;align-items:center;text-align:left;background:var(--p2);border:1px solid var(--bd);color:var(--tx);border-radius:7px;padding:8px 9px;cursor:pointer}.roomPick button.on{border-color:var(--cy);background:#0e2626}.roomPick span{color:var(--mut);font-size:10px}
+.aiPromptView summary{cursor:pointer;color:var(--mut);font-size:11px}.aiPromptView pre{background:var(--bg);border:1px solid var(--bd);border-radius:7px;padding:9px;font-size:10.5px;white-space:pre-wrap;max-height:220px;overflow:auto;margin-top:6px}
 .floorBest.furnished{max-width:960px}.floorBest.furnished .floorSvg{height:440px}
 .furnToggle{background:var(--p2);border:1px solid var(--bd);color:var(--tx);border-radius:7px;padding:4px 9px;font-size:11px;cursor:pointer}.furnToggle.on{border-color:var(--cy);background:#0e2626;color:#7fdede}
 .furnBar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 10px;border-top:1px solid var(--bd);font-size:10.5px;color:var(--mut)}

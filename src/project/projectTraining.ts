@@ -20,6 +20,72 @@ export interface ProjectTrainingResult {
   };
 }
 
+/** Normaliziran vhod za sestavo projekta — enak za IFC in AI-ekstrakcijo. */
+interface TrainingInput {
+  sourceId: string;
+  name: string;
+  officeCount: number;
+  maleCount: number;
+  femaleCount: number;
+  unisexCount: number;
+  averageOfficeArea: number;
+  averageWcArea: number;
+  mainCorridorMm: number;
+  sideCorridorMm: number;
+  roomsCount: number;
+  corridorsCount: number;
+  /** načrt za indukcijo strateškega profila (WC gruča/razpršenost, hodniki) */
+  plan: NormalizedIfcPlan;
+}
+
+/** Skupno jedro: iz normaliziranega vhoda sestavi brief + profil + dokaz. */
+function assembleProjectTraining(input: TrainingInput): ProjectTrainingResult {
+  const wcTotal = input.maleCount + input.femaleCount + input.unisexCount;
+  const programArea = input.officeCount * input.averageOfficeArea + wcTotal * input.averageWcArea;
+  const corridorArea = Math.max(programArea * 0.18, input.corridorsCount * (input.mainCorridorMm / 1000) * 8);
+  const targetArea = round1((programArea + corridorArea) * 1.08);
+  const aspect = targetArea > 600 ? 1.25 : 1.4;
+  const minimumFrontage = ((input.officeCount * 2.4 + wcTotal * 1.2) / 2) * 1.15;
+  const width = round1(Math.min(120, Math.max(8, minimumFrontage, Math.sqrt(targetArea * aspect))));
+  const depth = round1(Math.max(6, targetArea / width));
+  const roomCandidates: RoomProgram[] = [
+    wcProgram('wc-men', 'male', input.maleCount),
+    wcProgram('wc-women', 'female', input.femaleCount),
+    wcProgram('wc-unisex', 'unisex', input.unisexCount),
+    { id: 'office', type: 'office', count: input.officeCount, workstations: 1, areaOverride: round1(input.averageOfficeArea) },
+    { id: 'corridor', type: 'corridor', count: 1 },
+  ];
+  const rooms = roomCandidates.filter((room) => room.type === 'corridor' || room.count > 0);
+
+  return {
+    sourceId: input.sourceId,
+    name: input.name,
+    brief: {
+      id: `${input.sourceId}-project`,
+      name: `${input.name} projekt`,
+      boundary: { area: targetArea, width, depth },
+      entrances: [{ id: 'ifc-main-entry', wall: 'S', position: 0.5, width: 1.2 }],
+      corridorPolicy: {
+        minWidth: round1(Math.max(0.9, input.sideCorridorMm / 1000)),
+        mainWidth: round1(Math.max(input.sideCorridorMm, input.mainCorridorMm) / 1000),
+        sideWidth: round1(input.sideCorridorMm / 1000),
+      },
+      rooms,
+    },
+    profile: induceFloorStrategyProfile(input.name, extractFloorStrategyObservations(input.plan)),
+    evidence: {
+      rooms: input.roomsCount,
+      corridors: input.corridorsCount,
+      wc: wcTotal,
+      office: input.officeCount,
+      mainCorridorMm: input.mainCorridorMm,
+      sideCorridorMm: input.sideCorridorMm,
+      averageOfficeArea: round1(input.averageOfficeArea),
+      averageWcArea: round1(input.averageWcArea),
+    },
+  };
+}
+
 export function projectTrainingFromIfcSummary(summary: IfcReferenceSummary): ProjectTrainingResult {
   const officeCount = Math.max(0, summary.normalized.byType.office || 0);
   const wcTotal = Math.max(0, summary.normalized.byType.wc || 0);
@@ -27,54 +93,57 @@ export function projectTrainingFromIfcSummary(summary: IfcReferenceSummary): Pro
   const maleCount = wcKinds.male || 0;
   const femaleCount = wcKinds.female || 0;
   const unisexCount = Math.max(0, wcTotal - maleCount - femaleCount);
-  const averageOfficeArea = averageArea(summary.sampleRooms.filter((room) => room.type === 'office'), 10);
-  const averageWcArea = averageArea(summary.sampleRooms.filter((room) => room.type === 'wc'), 3.2);
   const mainCorridorMm = summary.corridorWidthsMm?.median || 1800;
   const sideCorridorMm = summary.corridorWidthsMm?.min || Math.min(mainCorridorMm, 1200);
-  const programArea = officeCount * averageOfficeArea + wcTotal * averageWcArea;
-  const corridorArea = Math.max(programArea * 0.18, summary.normalized.corridors * (mainCorridorMm / 1000) * 8);
-  const targetArea = round1((programArea + corridorArea) * 1.08);
-  const aspect = targetArea > 600 ? 1.25 : 1.4;
-  const minimumFrontage = ((officeCount * 2.4 + wcTotal * 1.2) / 2) * 1.15;
-  const width = round1(Math.min(120, Math.max(8, minimumFrontage, Math.sqrt(targetArea * aspect))));
-  const depth = round1(Math.max(6, targetArea / width));
-  const roomCandidates: RoomProgram[] = [
-    wcProgram('wc-men', 'male', maleCount),
-    wcProgram('wc-women', 'female', femaleCount),
-    wcProgram('wc-unisex', 'unisex', unisexCount),
-    { id: 'office', type: 'office', count: officeCount, workstations: 1, areaOverride: round1(averageOfficeArea) },
-    { id: 'corridor', type: 'corridor', count: 1 },
-  ];
-  const rooms = roomCandidates.filter((room) => room.type === 'corridor' || room.count > 0);
 
-  const plan = normalizedPlanFromSummary(summary);
-  return {
+  return assembleProjectTraining({
     sourceId: summary.id,
     name: summary.name,
-    brief: {
-      id: `${summary.id}-project`,
-      name: `${summary.name} projekt`,
-      boundary: { area: targetArea, width, depth },
-      entrances: [{ id: 'ifc-main-entry', wall: 'S', position: 0.5, width: 1.2 }],
-      corridorPolicy: {
-        minWidth: round1(Math.max(0.9, sideCorridorMm / 1000)),
-        mainWidth: round1(Math.max(sideCorridorMm, mainCorridorMm) / 1000),
-        sideWidth: round1(sideCorridorMm / 1000),
-      },
-      rooms,
-    },
-    profile: induceFloorStrategyProfile(summary.name, extractFloorStrategyObservations(plan)),
-    evidence: {
-      rooms: summary.normalized.rooms,
-      corridors: summary.normalized.corridors,
-      wc: wcTotal,
-      office: officeCount,
-      mainCorridorMm,
-      sideCorridorMm,
-      averageOfficeArea: round1(averageOfficeArea),
-      averageWcArea: round1(averageWcArea),
-    },
-  };
+    officeCount,
+    maleCount,
+    femaleCount,
+    unisexCount,
+    averageOfficeArea: averageArea(summary.sampleRooms.filter((room) => room.type === 'office'), 10),
+    averageWcArea: averageArea(summary.sampleRooms.filter((room) => room.type === 'wc'), 3.2),
+    mainCorridorMm,
+    sideCorridorMm,
+    roomsCount: summary.normalized.rooms,
+    corridorsCount: summary.normalized.corridors,
+    plan: normalizedPlanFromSummary(summary),
+  });
+}
+
+/**
+ * Druga uvozna pot: realni načrt prek AI-ekstrakcije → NormalizedIfcPlan → isti
+ * projektni trening kot IFC. Enota mer v načrtu je mm (w/d prostorov, širine hodnikov).
+ */
+export function projectTrainingFromNormalizedPlan(plan: NormalizedIfcPlan): ProjectTrainingResult {
+  const officeRooms = plan.rooms.filter((room) => room.roomType === 'office');
+  const wcRooms = plan.rooms.filter((room) => room.roomType === 'wc');
+  const maleCount = wcRooms.filter((room) => room.wcKind === 'male').length;
+  const femaleCount = wcRooms.filter((room) => room.wcKind === 'female').length;
+  const unisexCount = wcRooms.length - maleCount - femaleCount;
+  const corridors = plan.corridors || [];
+  const mainWidths = corridors.filter((corridor) => corridor.role === 'main').map((corridor) => corridor.width);
+  const allWidths = corridors.map((corridor) => corridor.width);
+  const mainCorridorMm = Math.round(median(mainWidths.length ? mainWidths : allWidths) || 1800);
+  const sideCorridorMm = Math.round(allWidths.length ? Math.min(...allWidths) : Math.min(mainCorridorMm, 1200));
+
+  return assembleProjectTraining({
+    sourceId: plan.sourceId || 'ai-plan',
+    name: plan.name || 'AI-ekstrahiran načrt',
+    officeCount: officeRooms.length,
+    maleCount,
+    femaleCount,
+    unisexCount,
+    averageOfficeArea: averageArea(officeRooms, 10),
+    averageWcArea: averageArea(wcRooms, 3.2),
+    mainCorridorMm,
+    sideCorridorMm,
+    roomsCount: plan.rooms.length,
+    corridorsCount: corridors.length,
+    plan,
+  });
 }
 
 function normalizedPlanFromSummary(summary: IfcReferenceSummary): NormalizedIfcPlan {
@@ -108,6 +177,13 @@ function wcProgram(id: string, wcKind: WcKind, count: number): RoomProgram {
 function averageArea(rooms: Array<{ w: number; d: number }>, fallback: number): number {
   if (!rooms.length) return fallback;
   return rooms.reduce((sum, room) => sum + (room.w * room.d) / 1_000_000, 0) / rooms.length;
+}
+
+function median(values: number[]): number {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 function round1(value: number): number {
