@@ -16,6 +16,8 @@ export interface PlacedRoom {
   doorToCorridor: boolean;
   /** rob prostora (kompas), ki se dotika hodnika — tja gredo vrata */
   doorSide?: Facing;
+  /** prostor se dotika fasade → možno okno */
+  hasWindow?: boolean;
   /** namembnostna/čistostna cona (iz uvoza ali sklepana iz tipa) */
   zone?: ZoneId;
 }
@@ -47,6 +49,8 @@ export interface FloorLayoutOptions {
   maxRoomDepth?: number;
   /** vzdolžna lega prečnega konektorja (0..1), ki poveže vzporedne hodnike z vhodom */
   connectorAt?: number;
+  /** okna: prostori z zahtevo po oknu (pisarne) prednostno v zunanje vrste ob fasadi */
+  windowAware?: boolean;
 }
 
 const MAX_CORRIDORS = 4;
@@ -59,6 +63,8 @@ interface RowSlot {
   depth: number;
   /** hodnik te vrste je pri manjši (−) ali večji (+) b-koordinati */
   towards: 1 | -1;
+  /** zunanji rob vrste leži na fasadi → vsi prostori v njej lahko dobijo okno */
+  exterior: boolean;
 }
 
 interface CorridorBand {
@@ -112,21 +118,39 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
   const runsPerRow = [ [0, ca0], [ca1, L] ].filter(([s, e]) => e - s >= 0.8) as Array<[number, number]>;
   const usable = runsPerRow.reduce((sum, [s, e]) => sum + (e - s), 0);
 
-  // Programe razporedimo po vrstah v zaporedju (ohrani lokalnost vrstnega reda — cone/WC skupaj),
-  // a uravnoteženo: vrsto polnimo do povprečja, nato preidemo na naslednjo.
   const programs = orderPrograms(expandPrograms(brief.rooms), roomOrder).filter((program) => program.type !== 'corridor');
-  const avgDepth = rows.length ? rows.reduce((sum, row) => sum + row.depth, 0) / rows.length : plan.rowDepth;
   const frontageOf = (program: RoomProgram, depth: number) => minimumFrontageForProgram(program, estimateRoomProgramArea({ ...program, count: 1 }), depth);
-  const totalFrontage = programs.reduce((sum, program) => sum + frontageOf(program, avgDepth), 0);
-  const targetPerRow = rows.length ? totalFrontage / rows.length : totalFrontage;
-  const rowLoad = rows.map(() => 0);
   const rowPlans: Array<Array<{ program: RoomProgram; frontage: number }>> = rows.map(() => []);
-  let rowIndex = 0;
-  for (const program of programs) {
-    while (rowIndex < rows.length - 1 && rowLoad[rowIndex] >= targetPerRow - 0.01) rowIndex++;
-    const frontage = frontageOf(program, rows[rowIndex].depth);
-    rowPlans[rowIndex].push({ program, frontage });
-    rowLoad[rowIndex] += frontage;
+  const avgDepth = rows.length ? rows.reduce((sum, row) => sum + row.depth, 0) / rows.length : plan.rowDepth;
+
+  if (opts.windowAware) {
+    // okna: prostori z oknom (pisarne) prednostno v zunanje vrste (ob fasadi), ostali (WC) v notranje
+    const rowRemaining = rows.map(() => usable);
+    const windowRows = rows.map((_, i) => i).filter((i) => rows[i].exterior);
+    const interiorRows = rows.map((_, i) => i).filter((i) => !rows[i].exterior);
+    const pickRow = (frontage: number, priority: number[]): number => {
+      const order = priority.length ? priority : rows.map((_, i) => i);
+      return order.find((i) => rowRemaining[i] >= frontage - 0.01) ?? order.find((i) => rowRemaining[i] > 0.01) ?? order[order.length - 1];
+    };
+    for (const program of programs) {
+      const priority = ROOM_TYPE_DEFINITIONS[program.type].needsWindow ? [...windowRows, ...interiorRows] : [...interiorRows, ...windowRows];
+      const frontage = frontageOf(program, rows[priority[0] ?? 0]?.depth ?? plan.rowDepth);
+      const rowIndex = pickRow(frontage, priority);
+      rowPlans[rowIndex].push({ program, frontage });
+      rowRemaining[rowIndex] -= frontage;
+    }
+  } else {
+    // privzeto: zaporedno polnjenje do povprečja (ohrani lokalnost reda → cone/WC dispergiranje delujeta)
+    const totalFrontage = programs.reduce((sum, program) => sum + frontageOf(program, avgDepth), 0);
+    const targetPerRow = rows.length ? totalFrontage / rows.length : totalFrontage;
+    const rowLoad = rows.map(() => 0);
+    let rowIndex = 0;
+    for (const program of programs) {
+      while (rowIndex < rows.length - 1 && rowLoad[rowIndex] >= targetPerRow - 0.01) rowIndex++;
+      const frontage = frontageOf(program, rows[rowIndex].depth);
+      rowPlans[rowIndex].push({ program, frontage });
+      rowLoad[rowIndex] += frontage;
+    }
   }
 
   const rooms: PlacedRoom[] = [];
@@ -143,7 +167,7 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
       const runLen = end - start;
       const total = bucketLen[bi];
       if (total > runLen + 0.05) warnings.push('Rooms exceed available frontage along the corridor.');
-      const scale = total > 0 && total < runLen ? runLen / total : 1;
+      const scale = total > 0 && total < runLen ? Math.min(1.6, runLen / total) : 1;
       let cursor = start;
       for (const plan of buckets[bi]) {
         const frontage = roundToGrid(plan.frontage * scale);
@@ -168,12 +192,14 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
   });
 
   const allCorridors = [...corridorRects, connector];
-  // Vrata: geometrijsko na rob, ki se dotika hodnika.
+  // Vrata: geometrijsko na rob, ki se dotika hodnika. Okno: prostor se dotika fasade.
+  // (okno je mehka kakovost, ne "ne gre v okvir" — zato ne gre med warnings, ampak v A/B signal + izris)
   for (const room of rooms) {
     const side = facingCorridor(room, allCorridors);
     room.doorSide = side ?? undefined;
     room.doorToCorridor = side !== null;
     if (!side) warnings.push(`Room ${room.id} has no corridor at its door.`);
+    room.hasWindow = touchesBoundary(room, boundary);
   }
 
   // Hodniki se križajo (veje × konektor) — presek odštejemo, da ne dvojno štejemo.
@@ -185,7 +211,7 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
 
   return {
     id: opts.id ?? `${roomOrder}-${corridorSide}-${plan.corridors.length}c-${mainW}`,
-    variant: `${roomOrder} · ${plan.singleLoaded ? 'enojni' : plan.corridors.length + '×'} hodnik ${orientationLabel(corridorSide)} · ${mainW.toFixed(1)} m · globina ${plan.rowDepth.toFixed(1)} m`,
+    variant: `${roomOrder} · ${plan.singleLoaded ? 'enojni' : plan.corridors.length + '×'} hodnik ${orientationLabel(corridorSide)} · ${mainW.toFixed(1)} m · globina ${plan.rowDepth.toFixed(1)} m${opts.windowAware ? ' · okna' : ''}`,
     boundary,
     rooms,
     corridor: mainCorridor,
@@ -204,6 +230,12 @@ function rectOverlapArea(a: PlacedRoom, b: PlacedRoom): number {
   return w * h;
 }
 
+/** Se prostor dotika zunanjega zidu etaže (možno okno)? */
+function touchesBoundary(room: PlacedRoom, boundary: FloorLayout['boundary']): boolean {
+  const t = 0.05;
+  return room.x <= t || room.y <= t || room.x + room.w >= boundary.width - t || room.y + room.d >= boundary.depth - t;
+}
+
 /** Koliko vzporednih hodnikov in kako globoke vrste, da nobena soba ni globlja od cap. */
 function planCorridors(Db: number, mainW: number, cap: number, minRow: number): { corridors: CorridorBand[]; rows: RowSlot[]; rowDepth: number; singleLoaded: boolean } {
   const corridors: CorridorBand[] = [];
@@ -217,12 +249,14 @@ function planCorridors(Db: number, mainW: number, cap: number, minRow: number): 
     return seg;
   };
 
+  const isExterior = (edge: number) => edge <= 0.05 || edge >= Db - 0.05;
+
   // enojno naložen hodnik ob robu, če je globina premajhna za dve vrsti
   if (Db < mainW + 2 * minRow) {
     const [c0, c1] = band(mainW);
     corridors.push({ b0: c0, depth: c1 - c0 });
     const rowDepth = roundToGrid(Db - (c1 - c0));
-    if (rowDepth > 0) rows.push({ b0: start, depth: rowDepth, towards: -1 });
+    if (rowDepth > 0) rows.push({ b0: start, depth: rowDepth, towards: -1, exterior: true });
     return { corridors, rows, rowDepth, singleLoaded: true };
   }
 
@@ -239,11 +273,11 @@ function planCorridors(Db: number, mainW: number, cap: number, minRow: number): 
   const rowDepth = (slabDepth - mainW) / 2;
   for (let s = 0; s < k; s++) {
     const [t0, t1] = band(rowDepth);
-    rows.push({ b0: t0, depth: t1 - t0, towards: 1 });
+    rows.push({ b0: t0, depth: t1 - t0, towards: 1, exterior: isExterior(t0) });
     const [c0, c1] = band(mainW);
     corridors.push({ b0: c0, depth: c1 - c0 });
     const [b0, b1] = band(rowDepth);
-    rows.push({ b0, depth: b1 - b0, towards: -1 });
+    rows.push({ b0, depth: b1 - b0, towards: -1, exterior: isExterior(b1) });
   }
   return { corridors, rows, rowDepth, singleLoaded: false };
 }
@@ -270,7 +304,9 @@ export function generateFloorLayoutPool(brief: ProjectBrief): FloorLayout[] {
     for (const roomOrder of ['program', 'reverse', 'offices-first', 'wc-first'] as const) {
       for (const corridorWidth of corridorWidthVariants(brief)) {
         for (const maxRoomDepth of depthVariants) {
-          variants.push({ corridorSide, roomOrder, corridorWidth, maxRoomDepth, id: `${corridorSide}-${roomOrder}-${corridorWidth}-d${maxRoomDepth}` });
+          for (const windowAware of [false, true] as const) {
+            variants.push({ corridorSide, roomOrder, corridorWidth, maxRoomDepth, windowAware, id: `${corridorSide}-${roomOrder}-${corridorWidth}-d${maxRoomDepth}${windowAware ? '-win' : ''}` });
+          }
         }
       }
     }

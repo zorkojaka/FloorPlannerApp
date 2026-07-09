@@ -1,5 +1,5 @@
 import type { FloorLayout, PlacedRoom } from './floorGenerator';
-import { zoneFromType, type ZoneId } from './roomTypes';
+import { ROOM_TYPE_DEFINITIONS, zoneFromType, type ZoneId } from './roomTypes';
 
 export interface FloorPreferenceWeights {
   compactness: number;
@@ -7,6 +7,7 @@ export interface FloorPreferenceWeights {
   wetGrouping: number;
   officeFrontage: number;
   zoneContiguity: number;
+  windowAccess: number;
 }
 
 export interface FloorPreferenceState {
@@ -16,11 +17,12 @@ export interface FloorPreferenceState {
 }
 
 export const DEFAULT_FLOOR_WEIGHTS: FloorPreferenceWeights = {
-  compactness: 0.2,
-  corridorEfficiency: 0.2,
-  wetGrouping: 0.2,
-  officeFrontage: 0.2,
-  zoneContiguity: 0.2,
+  compactness: 0.18,
+  corridorEfficiency: 0.18,
+  wetGrouping: 0.16,
+  officeFrontage: 0.16,
+  zoneContiguity: 0.16,
+  windowAccess: 0.16,
 };
 
 export function initialFloorPreferenceState(): FloorPreferenceState {
@@ -37,12 +39,14 @@ export function scoreFloorLayout(layout: FloorLayout, weights: FloorPreferenceWe
   const wetGrouping = wetGroupingScore(layout);
   const officeFrontage = officeFrontageScore(layout);
   const zoneContiguity = zoneContiguityScore(layout);
+  const windowAccess = windowAccessScore(layout);
   return overflow * (
     compactness * weights.compactness +
     corridorEfficiency * weights.corridorEfficiency +
     wetGrouping * weights.wetGrouping +
     officeFrontage * weights.officeFrontage +
-    zoneContiguity * weights.zoneContiguity
+    zoneContiguity * weights.zoneContiguity +
+    windowAccess * weights.windowAccess
   );
 }
 
@@ -76,7 +80,15 @@ export function floorSignals(layout: FloorLayout): FloorPreferenceWeights {
     wetGrouping: wetGroupingScore(layout),
     officeFrontage: officeFrontageScore(layout),
     zoneContiguity: zoneContiguityScore(layout),
+    windowAccess: windowAccessScore(layout),
   };
+}
+
+/** Delež prostorov, ki potrebujejo okno (pisarne) in ga dejansko imajo (ob fasadi). */
+function windowAccessScore(layout: FloorLayout): number {
+  const needing = layout.rooms.filter((room) => ROOM_TYPE_DEFINITIONS[room.type]?.needsWindow);
+  if (!needing.length) return 1;
+  return needing.filter((room) => room.hasWindow).length / needing.length;
 }
 
 /**

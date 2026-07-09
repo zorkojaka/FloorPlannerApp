@@ -112,6 +112,29 @@ describe('project floor generator', () => {
     expect(wcs.every((room) => room.w >= 2.4 || room.d >= 2.4)).toBe(true);
   });
 
+  it('window-aware placement gives offices a facade window in deep floors', () => {
+    const deepBrief: ProjectBrief = {
+      ...brief,
+      boundary: { area: 720, width: 30, depth: 24 },
+      rooms: [
+        { id: 'office', type: 'office', count: 20, workstations: 1 },
+        { id: 'wc-men', type: 'wc', wcKind: 'male', count: 2 },
+        { id: 'wc-women', type: 'wc', wcKind: 'female', count: 2 },
+        { id: 'corridor', type: 'corridor', count: 1 },
+      ],
+    };
+    const officeWindows = (layout: FloorLayout) => {
+      const offices = layout.rooms.filter((room) => room.type === 'office');
+      return offices.filter((room) => room.hasWindow).length / offices.length;
+    };
+    const plain = generateStripFloorLayout(deepBrief, { windowAware: false });
+    const windowed = generateStripFloorLayout(deepBrief, { windowAware: true });
+    // globoka etaža ima notranje vrste → brez oken; okenska razporeditev pisarne potisne na fasado
+    expect(windowed.corridorLinks.filter((c) => c.id.startsWith('corridor-main')).length).toBeGreaterThan(0);
+    expect(officeWindows(windowed)).toBeGreaterThan(officeWindows(plain));
+    expect(windowed.rooms.every((room) => room.hasWindow !== undefined)).toBe(true);
+  });
+
   it('keeps all entrances and orients the corridor from the first entrance', () => {
     const layout = generateStripFloorLayout({
       ...brief,

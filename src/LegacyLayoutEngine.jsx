@@ -337,6 +337,7 @@ function FloorSvg({layout,floorItems,layer="rooms",layers=null}){
       <rect x={pad+r.x} y={pad+r.y} width={r.w} height={r.d} fill={roomFill(r)} opacity={flowView&&r.type!=="corridor"?0.5:1} stroke={r.type==="corridor"?"#8a6d19":"#22313a"} strokeWidth={r.type==="corridor"?strokeWidth*1.5:strokeWidth}/>
       {!(hasFurn&&r.type!=="corridor")&&<text x={pad+r.x+r.w/2} y={pad+r.y+r.d/2} textAnchor="middle" dominantBaseline="middle" fontSize={roomLabelSize(r,fontSize)} fontWeight={r.type==="wc"?"700":"400"} fill="#10161b">{roomLabel(r)}</text>}
       {!hasFurn&&!flowView&&r.doorToCorridor&&(()=>{const d=doorRect(r,strokeWidth);return <rect x={pad+d.x} y={pad+d.y} width={d.w} height={d.h} fill="#e2553f"/>;})()}
+      {!hasFurn&&!flowView&&r.type!=="corridor"&&r.hasWindow&&windowBars(r,W,D).map((b,bi)=><rect key={"win"+bi} x={pad+b.x} y={pad+b.y} width={b.w} height={b.h} fill="#eef7ff" stroke="#2f74c0" strokeWidth={strokeWidth*0.5}/>)}
     </g>)}
     {hasFurn&&floorItems.map((it,i)=>it.kind==="door"
       ? <rect key={"fi"+i} x={pad+it.x} y={pad+it.y} width={it.w} height={it.h} fill="#e2553f"/>
@@ -357,6 +358,17 @@ function doorRect(r,sw){
   if(side==="S") return {x:r.x+r.w/2-len/2,y:r.y+r.d-sw,w:len,h:t};
   if(side==="W") return {x:r.x-sw,y:r.y+r.d/2-len/2,w:t,h:len};
   return {x:r.x+r.w-sw,y:r.y+r.d/2-len/2,w:t,h:len};
+}
+// okenske pregrade tik ob fasadi (na notranji strani zunanjega zidu), za robove z hasWindow
+function windowBars(r,W,D){
+  const bars=[],e=0.06;
+  const t=clamp(Math.min(r.w,r.d)*0.16,0.14,0.35),ins=0.04;
+  const lenH=Math.min(r.w*0.72,r.w-0.2),lenV=Math.min(r.d*0.72,r.d-0.2);
+  if(r.y<=e) bars.push({x:r.x+(r.w-lenH)/2,y:r.y+ins,w:lenH,h:t});
+  if(r.y+r.d>=D-e) bars.push({x:r.x+(r.w-lenH)/2,y:r.y+r.d-ins-t,w:lenH,h:t});
+  if(r.x<=e) bars.push({x:r.x+ins,y:r.y+(r.d-lenV)/2,w:t,h:lenV});
+  if(r.x+r.w>=W-e) bars.push({x:r.x+r.w-ins-t,y:r.y+(r.d-lenV)/2,w:t,h:lenV});
+  return bars;
 }
 function furnFill(cat){return ({desk:"#5b9bd0",chair:"#89b4da",cabinet:"#caa14e",storage:"#caa14e",shelf:"#caa14e",toilet:"#3fb0b0",sink:"#5cc0c0",urinal:"#5cc0c0"})[cat]||"#b9c0c8";}
 function furnStroke(cat){return ({desk:"#28587e",chair:"#3f6890",cabinet:"#7a5f18",storage:"#7a5f18",shelf:"#7a5f18",toilet:"#166a6a",sink:"#1f7d7d",urinal:"#1f7d7d"})[cat]||"#5b6673";}
@@ -391,7 +403,7 @@ function roomLabel(room){
 function roomLabelSize(room,fontSize){
   return room.type==="wc"?fontSize*1.8:fontSize;
 }
-function floorWeightLabel(key){return ({compactness:"izraba",corridorEfficiency:"hodnik",wetGrouping:"mokri sklop",officeFrontage:"pisarne/okna",zoneContiguity:"cone skupaj"})[key]||key;}
+function floorWeightLabel(key){return ({compactness:"izraba",corridorEfficiency:"hodnik",wetGrouping:"mokri sklop",officeFrontage:"pisarne globina",zoneContiguity:"cone skupaj",windowAccess:"okna"})[key]||key;}
 function round1(v){return Math.round(v*10)/10;}
 function makeStrategyProfile(kind){
   const plan=kind==="dispersed"
