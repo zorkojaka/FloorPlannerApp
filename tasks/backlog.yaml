@@ -90,7 +90,7 @@ tasks:
   # ── Sklop B: učenje iz naloženih načrtov ─────────────────────────────────
   - id: FP-005
     title: Knjižnica referenčnih načrtov (nalaganje, tipiziranje, trajnost)
-    status: ready
+    status: done
     priority: P1
     effort: M
     agent: Claude Code
@@ -99,7 +99,7 @@ tasks:
       → verifikacijski overlay → shranjen NormalizedPlan). Vsaka referenca dobi
       tip: wc / pisarna / cela etaža / proizvodnja. Trajno shranjeno (localStorage,
       kasneje backend), reference se lahko doda/odstrani, indukcija se preračuna.
-    next_step: UI knjižnica nad obstoječim claudeExtraction + normalizedPlan tokom.
+    next_step: Izvedeno 2026-07-10 — src/project/referenceLibrary.ts (tipizirane reference, kombinirani etažni profil iz vseh referenc, samodejno sklepanje tipa), UI v fazi Šolanje (shrani AI/IFC, odstrani s preračunom), localStorage persistenca; E2E preverjeno.
     acceptance:
       - Naložim 3 načrte WC in 2 etaži — vidim jih v knjižnici s tipom in povzetkom.
       - Odstranitev reference preračuna inducirana pravila brez spremembe kode.

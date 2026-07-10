@@ -30,7 +30,8 @@ import { initialRoomTypePrefs, prefStateForType, recordRoomTypePreference, recor
 import { deriveFloorLayers, ZONE_DEFS, zoneFill, zoneLabel } from "./project/floorLayers";
 import { extractFloorStrategyObservations, induceFloorStrategyProfile, rankFloorLayoutsByProfile, scoreFloorLayoutByProfile } from "./ifc/floorStrategy";
 import { IFC_REFERENCE_SETS } from "./training/ifcReferenceSets";
-import { projectTrainingFromIfcSummary, projectTrainingFromNormalizedPlan } from "./project/projectTraining";
+import { projectTrainingFromIfcSummary, projectTrainingFromNormalizedPlan, normalizedPlanFromSummary } from "./project/projectTraining";
+import { addReference, removeReference, referencesOfKind, referenceSummary, floorTrainingFromLibrary, inferReferenceKind, initialReferenceLibrary, normalizeReferenceLibrary, REFERENCE_KIND_LABELS } from "./project/referenceLibrary";
 import { AI_EXTRACTION_PROMPT, parseAiExtractedPlan } from "./ifc/aiExtraction";
 import { extractPlanWithClaude, fileToSource, DEFAULT_EXTRACTION_MODEL } from "./ifc/claudeExtraction";
 
@@ -602,6 +603,27 @@ function O9({library,setLibrary,onOpenProject}){
   const [aiSrc,setAiSrc]=useState(null); // {dataUrl, source:{base64,mediaType}, isImage}
   const [aiPlan,setAiPlan]=useState(null); // razčlenjen načrt za overlay
   const [aiBusy,setAiBusy]=useState(false);
+  // knjižnica referenčnih načrtov (FP-005): tipizirane reference, trajne, indukcija iz vsebine
+  const [rawRefLib,setRefLib]=usePersistentState("floorplanner.trainingLibrary",initialReferenceLibrary);
+  const refLib=useMemo(()=>normalizeReferenceLibrary(rawRefLib),[rawRefLib]);
+  const [saveKind,setSaveKind]=useState("");
+  const floorRefs=referencesOfKind(refLib,"floor");
+  const saveAiToLibrary=()=>{
+    try{
+      const plan=aiPlan||parseAiExtractedPlan(aiRaw);
+      const kind=saveKind||inferReferenceKind(plan);
+      setRefLib(l=>addReference(normalizeReferenceLibrary(l),{plan,source:"ai",kind}));
+      setAiErr("");setAiMsg(`Shranjeno v knjižnico: "${plan.name}" kot ${REFERENCE_KIND_LABELS[kind]}.`);
+    }catch(e){setAiErr(e.message||String(e));}
+  };
+  const saveIfcToLibrary=(summary)=>{
+    setRefLib(l=>addReference(normalizeReferenceLibrary(l),{plan:normalizedPlanFromSummary(summary),name:summary.name,source:"ifc",kind:"floor"}));
+  };
+  const applyLibrary=()=>{
+    const lt=floorTrainingFromLibrary(refLib);
+    if(!lt) return;
+    applyTraining({...lt.training,name:lt.profile.name,profile:lt.profile});
+  };
   const loadPreset=(items)=>setRaw(JSON.stringify(items,null,2));
   const applyTraining=(training)=>{
     saveJson(typeof window==="undefined"?undefined:window.localStorage,"floorplanner.project.brief",training.brief);
@@ -658,6 +680,17 @@ function O9({library,setLibrary,onOpenProject}){
   const apply=()=>setLibrary(L=>applyInducedRules(L,rules));
   return <div className="o9 grid3">
     <aside className="col">
+      <div className="eyebrow">Knjižnica referenčnih načrtov</div>
+      {refLib.references.length===0
+        ? <div className="softNote">Prazna — shrani AI-ekstrahiran načrt ali IFC referenco spodaj. Tipizirane reference (WC / pisarna / etaža / proizvodnja) napajajo indukcijo; odstranitev reference preračuna profil.</div>
+        : <div className="ifcTrainingList">
+            {refLib.references.map(ref=><div key={ref.id} className="ifcTrainingCard">
+              <div className="rHead"><b>{ref.name}</b><span>{REFERENCE_KIND_LABELS[ref.kind]}</span></div>
+              <div className="ruleMeta">{referenceSummary(ref)} · vir {ref.source} · {ref.addedAt.slice(0,10)}</div>
+              <button className="champStay" onClick={()=>setRefLib(l=>removeReference(normalizeReferenceLibrary(l),ref.id))}>odstrani ×</button>
+            </div>)}
+          </div>}
+      {floorRefs.length>0&&<button className="regen" onClick={applyLibrary}>Uporabi knjižnico v projektu ({floorRefs.length} etažnih → skupni profil)</button>}
       <div className="eyebrow">IFC učne reference</div>
       <div className="ifcTrainingList">
         {IFC_REFERENCE_SETS.map(summary=>{
@@ -671,7 +704,10 @@ function O9({library,setLibrary,onOpenProject}){
               <span>hodnik <b>{training.evidence.mainCorridorMm} mm</b></span>
             </div>
             <div className="ruleMeta">vrata {summary.entityCounts.IfcDoor||0} · okna {summary.entityCounts.IfcWindow||0} · file {summary.file}</div>
-            <button className="regen" onClick={()=>applyProjectTraining(summary)}>Uporabi v projektu</button>
+            <div className="presetRow">
+              <button className="regen" onClick={()=>applyProjectTraining(summary)}>Uporabi v projektu</button>
+              <button className="regen" onClick={()=>saveIfcToLibrary(summary)}>💾 V knjižnico</button>
+            </div>
           </div>;
         })}
       </div>
@@ -686,6 +722,13 @@ function O9({library,setLibrary,onOpenProject}){
       {aiSrc&&aiSrc.isImage&&<AiOverlay src={aiSrc.dataUrl} plan={aiPlan}/>}
       {aiSrc&&!aiSrc.isImage&&<div className="softNote">PDF naložen — predogled ni na voljo; po ekstrakciji preveri prostore v JSON spodaj.</div>}
       <button className="regen" onClick={importAiPlan} disabled={!aiRaw}>Uvozi in uporabi v projektu</button>
+      <div className="presetRow">
+        <select value={saveKind} onChange={e=>setSaveKind(e.target.value)}>
+          <option value="">tip: samodejno</option>
+          {Object.entries(REFERENCE_KIND_LABELS).map(([k,l])=><option key={k} value={k}>{l}</option>)}
+        </select>
+        <button className="regen" onClick={saveAiToLibrary} disabled={!aiRaw&&!aiPlan}>💾 Shrani v knjižnico</button>
+      </div>
       <details className="aiPromptView"><summary>Brez ključa / ročno: kopiraj prompt, prilepi JSON</summary>
         <div className="presetRow"><button onClick={copyAiPrompt}>📋 Kopiraj AI-prompt</button></div>
         <textarea className="refBox" value={aiRaw} onChange={e=>setAiRaw(e.target.value)} placeholder='{"name":"...","corridors":[...],"rooms":[...]}' spellCheck="false"/>

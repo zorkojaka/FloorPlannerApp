@@ -158,7 +158,8 @@ export function projectTrainingFromNormalizedPlan(plan: NormalizedIfcPlan): Proj
   });
 }
 
-function normalizedPlanFromSummary(summary: IfcReferenceSummary): NormalizedIfcPlan {
+/** IFC povzetek → normaliziran načrt (izvožen: knjižnica referenc shrani isti format kot AI-ekstrakcija). */
+export function normalizedPlanFromSummary(summary: IfcReferenceSummary): NormalizedIfcPlan {
   return {
     sourceId: summary.id,
     name: summary.name,
