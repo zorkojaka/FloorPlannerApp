@@ -107,7 +107,7 @@ tasks:
 
   - id: FP-006
     title: Indukcija pravil pohištva iz referenc per tip sobe (WC, pisarna)
-    status: ready
+    status: done
     priority: P1
     effort: L
     agent: Claude Code
@@ -118,7 +118,7 @@ tasks:
       pravila (min→jedro, mediana→halo, p90→nasičenje, varianca→zaupanje),
       ki jih sobni generator dejansko uporablja. Pravila pregledna in uredljiva
       (steklena škatla). Ločeni rule-seti per tip sobe.
-    next_step: Razširi rules/induction.ts + ifc/observations.ts na pohištvene parametre in poveži z searchLayouts.
+    next_step: Izvedeno 2026-07-10 — roomRuleSetsFromLibrary (opazovanja per tip sobe → envelope pravila), floorFurnish jih uporablja (applyInducedRules per sobo), AI-ekstrakcija zdaj prenaša elemente (prompt + parser), UI izlušči/prikaže/odstrani pravila. Testi ločenosti WC/pisarna + E2E.
     depends_on: [FP-005]
     acceptance:
       - Zamenjava nabora WC referenc spremeni WC postavitve brez spremembe kode.

@@ -17,6 +17,8 @@ import { baseLib } from '../elements/library';
 import type { FloorLayout, PlacedRoom } from './floorGenerator';
 import type { RoomType } from './roomTypes';
 import { channelsForType, type RoomTypePrefs } from './roomTypePreference';
+import { applyInducedRules } from '../rules/induction';
+import type { RoomRuleSets } from './referenceLibrary';
 
 export interface FloorFurnItem {
   roomId: string;
@@ -209,10 +211,13 @@ export function roomCandidatePool(
   room: PlacedRoom,
   override: RoomOverride = {},
   samples = 240,
+  ruleSets?: RoomRuleSets,
 ): { res: GenerateResult; spec: RoomSearchSpec } {
   const spec = roomSearchSpec(layout, room, override);
+  // inducirana pravila tipa sobe (iz referenc) prepišejo privzete envelope — pravila so podatki
+  const rules = ruleSets?.[room.type];
   const res = searchLayouts({
-    library: baseLib(),
+    library: rules?.length ? applyInducedRules(baseLib(), rules) : baseLib(),
     program: spec.program,
     cfg: spec.cfg,
     soft: true,
@@ -233,6 +238,7 @@ export function furnishFloorLayout(
   layout: FloorLayout,
   choices: Record<string, RoomChoice>,
   prefs?: RoomTypePrefs,
+  ruleSets?: RoomRuleSets,
 ): FloorFurnishing {
   const results: RoomFurnResult[] = [];
 
@@ -241,7 +247,7 @@ export function furnishFloorLayout(
 
     const raw = choices[room.id];
     const override: RoomOverride = typeof raw === 'string' ? { presetId: raw } : raw || {};
-    const { res, spec } = roomCandidatePool(layout, room, override);
+    const { res, spec } = roomCandidatePool(layout, room, override, 240, ruleSets);
     const { presetId, fixtureKeys, cfg } = spec;
 
     // naučene preference tipa sobe rangirajo bazen — izbire v eni pisarni izboljšajo vse pisarne

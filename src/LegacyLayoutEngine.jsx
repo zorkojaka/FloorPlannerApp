@@ -31,7 +31,7 @@ import { deriveFloorLayers, ZONE_DEFS, zoneFill, zoneLabel } from "./project/flo
 import { extractFloorStrategyObservations, induceFloorStrategyProfile, rankFloorLayoutsByProfile, scoreFloorLayoutByProfile } from "./ifc/floorStrategy";
 import { IFC_REFERENCE_SETS } from "./training/ifcReferenceSets";
 import { projectTrainingFromIfcSummary, projectTrainingFromNormalizedPlan, normalizedPlanFromSummary } from "./project/projectTraining";
-import { addReference, removeReference, referencesOfKind, referenceSummary, floorTrainingFromLibrary, inferReferenceKind, initialReferenceLibrary, normalizeReferenceLibrary, REFERENCE_KIND_LABELS } from "./project/referenceLibrary";
+import { addReference, removeReference, referencesOfKind, referenceSummary, floorTrainingFromLibrary, roomRuleSetsFromLibrary, inferReferenceKind, initialReferenceLibrary, normalizeReferenceLibrary, REFERENCE_KIND_LABELS } from "./project/referenceLibrary";
 import { AI_EXTRACTION_PROMPT, parseAiExtractedPlan } from "./ifc/aiExtraction";
 import { extractPlanWithClaude, fileToSource, DEFAULT_EXTRACTION_MODEL } from "./ifc/claudeExtraction";
 
@@ -109,6 +109,7 @@ function ProjectWorkflow({onContinue}){
   const [brief,setBrief]=usePersistentState("floorplanner.project.brief",DEFAULT_PROJECT);
   const [rawPref,setPref]=usePersistentState("floorplanner.project.preference",initialFloorPreferenceState);
   const [roomPrefs,setRoomPrefs]=usePersistentState("floorplanner.project.roomPrefs",initialRoomTypePrefs);
+  const [roomRules]=usePersistentState("floorplanner.project.roomRules",{}); // inducirana pravila iz faze Šolanje
   const [strategyProfile,setStrategyProfile]=usePersistentState("floorplanner.project.strategyProfile",null);
   const [pairIndex,setPairIndex]=usePersistentState("floorplanner.project.pairIndex",0);
   const [selectedRoomId,setSelectedRoomId]=usePersistentState("floorplanner.project.selectedRoomId",null);
@@ -168,7 +169,7 @@ function ProjectWorkflow({onContinue}){
   const summary=estimateProjectArea(brief);
   const selectedRoom=champion?.rooms.find(r=>r.id===selectedRoomId)||champion?.rooms[0];
   const furnishOnStep=furnishOn||projektStep>=3;
-  const furnishing=useMemo(()=>furnishOnStep&&champion?furnishFloorLayout(champion,furnChoices,roomPrefs):{results:[],items:[]},[furnishOnStep,champion,furnChoices,roomPrefs]);
+  const furnishing=useMemo(()=>furnishOnStep&&champion?furnishFloorLayout(champion,furnChoices,roomPrefs,roomRules):{results:[],items:[]},[furnishOnStep,champion,furnChoices,roomPrefs,roomRules]);
   const furnRooms=furnishing.results;
   const furnOk=furnRooms.filter(r=>r.status==="found"||r.status==="empty").length;
   // per-soba override (preset/seed/zones) — vrednost furnChoices je lahko string (star zapis) ali objekt
@@ -181,7 +182,7 @@ function ProjectWorkflow({onContinue}){
   // drill-down: aktivni A/B za izbrano sobo — par z največjim informacijskim donosom
   // iz bazena kandidatov; izbira uči preference PER TIP SOBE (prenos med pisarnami)
   const drillRoom=projektStep>=3?champion?.rooms.find(r=>r.id===selectedRoomId&&r.type!=="corridor"):null;
-  const drillPool=useMemo(()=>champion&&drillRoom?roomCandidatePool(champion,drillRoom,roomOverride(drillRoom.id)):null,[champion,drillRoom?.id,furnChoices]);
+  const drillPool=useMemo(()=>champion&&drillRoom?roomCandidatePool(champion,drillRoom,roomOverride(drillRoom.id),240,roomRules):null,[champion,drillRoom?.id,furnChoices,roomRules]);
   const drillPrefState=drillRoom?prefStateForType(roomPrefs,drillRoom.type):null;
   const drillPair=useMemo(()=>{
     if(!drillPool||!drillPrefState||drillPool.res.candidates.length<2) return null;
@@ -624,6 +625,14 @@ function O9({library,setLibrary,onOpenProject}){
     if(!lt) return;
     applyTraining({...lt.training,name:lt.profile.name,profile:lt.profile});
   };
+  // FP-006: pravila pohištva per tip sobe iz knjižnice — generator jih bere pri opremljanju
+  const [roomRules,setRoomRules]=usePersistentState("floorplanner.project.roomRules",{});
+  const extractRoomRules=()=>{
+    const sets=roomRuleSetsFromLibrary(refLib);
+    setRoomRules(sets);
+    const counts=Object.entries(sets).map(([t,r])=>`${t}: ${r.length}`).join(", ");
+    setAiMsg(counts?`Pravila pohištva iz knjižnice → ${counts}. Projekt jih uporablja pri opremljanju.`:"V knjižnici ni opazovanj pohištva (reference brez elementov v sobah).");
+  };
   const loadPreset=(items)=>setRaw(JSON.stringify(items,null,2));
   const applyTraining=(training)=>{
     saveJson(typeof window==="undefined"?undefined:window.localStorage,"floorplanner.project.brief",training.brief);
@@ -691,6 +700,15 @@ function O9({library,setLibrary,onOpenProject}){
             </div>)}
           </div>}
       {floorRefs.length>0&&<button className="regen" onClick={applyLibrary}>Uporabi knjižnico v projektu ({floorRefs.length} etažnih → skupni profil)</button>}
+      {refLib.references.length>0&&<button className="regen" onClick={extractRoomRules}>Izlušči pravila pohištva ({refLib.references.length} referenc → per tip sobe)</button>}
+      {Object.keys(roomRules).length>0&&<div className="ifcTrainingList">
+        {Object.entries(roomRules).map(([type,rules])=><div key={type} className="ifcTrainingCard">
+          <div className="rHead"><b>Pravila pohištva: {type}</b><span>{rules.length}</span></div>
+          {rules.map(r=><div key={r.id} className="ruleMeta">{r.elementKey} · {r.parameter}: {r.envelope.core}/{r.envelope.halo}/{r.envelope.sat} mm · conf {r.envelope.conf.toFixed(2)} · n={r.count}</div>)}
+          <div className="refs">{[...new Set(rules.flatMap(r=>r.references.map(ref=>ref.split(":")[0])))].join(" · ")}</div>
+        </div>)}
+        <button className="champStay" onClick={()=>{setRoomRules({});setAiMsg("Pravila pohištva odstranjena — projekt spet uporablja privzete envelope.");}}>odstrani pravila</button>
+      </div>}
       <div className="eyebrow">IFC učne reference</div>
       <div className="ifcTrainingList">
         {IFC_REFERENCE_SETS.map(summary=>{

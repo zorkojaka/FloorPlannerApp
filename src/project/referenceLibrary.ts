@@ -1,5 +1,7 @@
 import type { NormalizedIfcPlan } from '../ifc/normalizedPlan';
 import { extractFloorStrategyObservations, induceFloorStrategyProfile, type FloorStrategyProfile } from '../ifc/floorStrategy';
+import { observationsFromNormalizedPlan } from '../ifc/observations';
+import { induceRules, type InducedRule, type ReferenceObservation } from '../rules/induction';
 import { projectTrainingFromNormalizedPlan, type ProjectTrainingResult } from './projectTraining';
 
 // Knjižnica referenčnih načrtov — enotno mesto za naložene načrte (AI-ekstrakcija,
@@ -110,4 +112,28 @@ export function floorTrainingFromLibrary(library: ReferenceLibrary): LibraryFloo
     profile: induceFloorStrategyProfile(name, observations),
     referenceCount: floors.length,
   };
+}
+
+/** Envelope pravila pohištva, LOČENA per tip sobe. Pravila so podatki, ne koda. */
+export type RoomRuleSets = Record<string, InducedRule[]>;
+
+/**
+ * Indukcija pravil pohištva iz knjižnice, LOČENO PER TIP SOBE: opazovanja sob
+ * tega tipa se zberejo iz vseh referenc (tudi iz etažnih — njihove WC/pisarne
+ * štejejo), nato obstoječa indukcija (min→jedro, mediana→halo, p90→nasičenje,
+ * varianca→zaupanje). Zamenjava WC referenc spremeni samo WC pravila.
+ */
+export function roomRuleSetsFromLibrary(library: ReferenceLibrary): RoomRuleSets {
+  const lib = normalizeReferenceLibrary(library);
+  const byType = new Map<string, ReferenceObservation[]>();
+  for (const ref of lib.references) {
+    for (const observation of observationsFromNormalizedPlan(ref.plan)) {
+      // hodniki so etažna pravila (širine), ne pravila pohištva v sobi
+      if (!observation.roomType || observation.roomType === 'corridor') continue;
+      byType.set(observation.roomType, [...(byType.get(observation.roomType) || []), observation]);
+    }
+  }
+  const sets: RoomRuleSets = {};
+  for (const [type, observations] of byType) sets[type] = induceRules(observations);
+  return sets;
 }

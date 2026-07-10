@@ -9,7 +9,11 @@ import {
   referencesOfKind,
   referenceSummary,
   removeReference,
+  roomRuleSetsFromLibrary,
 } from './referenceLibrary';
+import { furnishFloorLayout } from './floorFurnish';
+import { generateStripFloorLayout } from './floorGenerator';
+import type { ProjectBrief } from './roomTypes';
 
 function wcPlan(id: string): NormalizedIfcPlan {
   return {
@@ -98,5 +102,108 @@ describe('knjižnica referenčnih načrtov (FP-005)', () => {
     let lib = initialReferenceLibrary();
     lib = addReference(lib, { plan: wcPlan('w'), kind: 'wc' });
     expect(floorTrainingFromLibrary(lib)).toBeNull();
+  });
+});
+
+function wcPlanWithClearance(id: string, clearanceMm: number): NormalizedIfcPlan {
+  const roomD = 2200;
+  const toiletD = 600;
+  return {
+    sourceId: id,
+    name: `WC ${id}`,
+    rooms: [
+      {
+        sourceId: `${id}-r1`,
+        name: 'WC',
+        roomType: 'wc',
+        w: 1800,
+        d: roomD,
+        // facing N → clearance-front = d − (y + toiletD); y izberemo, da dobimo želeni odmik
+        elements: [{ sourceId: `${id}-e1`, name: 'WC', elementKey: 'toilet', x: 200, y: roomD - toiletD - clearanceMm, w: 400, d: toiletD, facing: 'N' }],
+      },
+    ],
+  };
+}
+
+function officePlanWithClearance(id: string, clearanceMm: number): NormalizedIfcPlan {
+  const roomD = 4200;
+  const deskD = 800;
+  return {
+    sourceId: id,
+    name: `Pisarna ${id}`,
+    rooms: [
+      {
+        sourceId: `${id}-r1`,
+        name: 'Pisarna',
+        roomType: 'office',
+        w: 3600,
+        d: roomD,
+        elements: [{ sourceId: `${id}-e1`, name: 'Miza', elementKey: 'desk', x: 300, y: roomD - deskD - clearanceMm, w: 1400, d: deskD, facing: 'N' }],
+      },
+    ],
+  };
+}
+
+describe('indukcija pravil pohištva per tip sobe (FP-006)', () => {
+  it('pravila so ločena per tip sobe in citirajo reference', () => {
+    let lib = initialReferenceLibrary();
+    lib = addReference(lib, { plan: wcPlanWithClearance('w1', 600), kind: 'wc' });
+    lib = addReference(lib, { plan: wcPlanWithClearance('w2', 750), kind: 'wc' });
+    lib = addReference(lib, { plan: officePlanWithClearance('o1', 1000), kind: 'office' });
+
+    const sets = roomRuleSetsFromLibrary(lib);
+    expect(Object.keys(sets).sort()).toEqual(['office', 'wc']);
+    const wcRule = sets.wc.find((rule) => rule.elementKey === 'toilet' && rule.parameter === 'clearance-front')!;
+    expect(wcRule.count).toBe(2);
+    expect(wcRule.envelope.core).toBe(600); // min → trdo jedro
+    expect(wcRule.references.join(' ')).toContain('w1');
+    expect(sets.office.every((rule) => rule.elementKey !== 'toilet')).toBe(true);
+  });
+
+  it('zamenjava WC referenc spremeni WC pravila, pisarniška ostanejo', () => {
+    let lib = initialReferenceLibrary();
+    lib = addReference(lib, { plan: wcPlanWithClearance('w1', 600), kind: 'wc' });
+    lib = addReference(lib, { plan: officePlanWithClearance('o1', 1000), kind: 'office' });
+    const before = roomRuleSetsFromLibrary(lib);
+
+    const wcId = referencesOfKind(lib, 'wc')[0].id;
+    let swapped = removeReference(lib, wcId);
+    swapped = addReference(swapped, { plan: wcPlanWithClearance('w9', 1100), kind: 'wc' });
+    const after = roomRuleSetsFromLibrary(swapped);
+
+    expect(after.wc[0].envelope.core).not.toBe(before.wc[0].envelope.core);
+    expect(JSON.stringify(after.office)).toBe(JSON.stringify(before.office));
+  });
+
+  it('inducirana pravila spremenijo opremljanje brez spremembe kode', () => {
+    const brief: ProjectBrief = {
+      id: 'rules-demo',
+      name: 'Rules demo',
+      boundary: { area: 120, width: 15, depth: 8 },
+      corridorPolicy: { minWidth: 1.2, mainWidth: 1.8, sideWidth: 1.2 },
+      rooms: [
+        { id: 'wc', type: 'wc', count: 1 },
+        { id: 'office', type: 'office', count: 2, workstations: 1 },
+        { id: 'corridor', type: 'corridor', count: 1 },
+      ],
+    };
+    const layout = generateStripFloorLayout(brief);
+
+    // ekstremno pravilo: WC školjka zahteva ogromen čelni odmik → postavitve se morajo spremeniti
+    let lib = initialReferenceLibrary();
+    lib = addReference(lib, { plan: wcPlanWithClearance('big1', 1900), kind: 'wc' });
+    lib = addReference(lib, { plan: wcPlanWithClearance('big2', 2000), kind: 'wc' });
+    const sets = roomRuleSetsFromLibrary(lib);
+
+    const plain = furnishFloorLayout(layout, {});
+    const ruled = furnishFloorLayout(layout, {}, undefined, sets);
+    const plainWc = plain.results.filter((r) => r.room.type === 'wc');
+    const ruledWc = ruled.results.filter((r) => r.room.type === 'wc');
+    const changed = ruledWc.some((r, i) => JSON.stringify(r.items) !== JSON.stringify(plainWc[i].items) || r.status !== plainWc[i].status);
+    expect(changed).toBe(true);
+    // pisarne pravilo WC ne gane (ločeni rule-seti)
+    const plainOffice = plain.results.filter((r) => r.room.type === 'office');
+    const ruledOffice = ruled.results.filter((r) => r.room.type === 'office');
+    expect(JSON.stringify(ruledOffice.map((r) => r.items))).toBe(JSON.stringify(plainOffice.map((r) => r.items)));
   });
 });

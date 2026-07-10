@@ -4,7 +4,7 @@
  * zato ga uživa ista strateška indukcija (project/projectTraining).
  */
 
-import type { NormalizedIfcPlan, NormalizedIfcRoom, NormalizedIfcCorridor, BBox } from './normalizedPlan';
+import type { NormalizedIfcPlan, NormalizedIfcRoom, NormalizedIfcCorridor, NormalizedIfcElement, BBox } from './normalizedPlan';
 import type { RoomType, WcKind } from '../project/roomTypes';
 
 export const AI_EXTRACTION_PROMPT = `Si arhitekturni ekstraktor. Priložil ti bom sliko ali PDF tlorisa etaže.
@@ -17,9 +17,11 @@ Vrni SAMO veljaven JSON (brez razlage) v tej obliki — dimenzije v MILIMETRIH, 
     { "sourceId": "c1", "name": "Glavni hodnik", "role": "main", "width": 1800 }
   ],
   "rooms": [
-    { "sourceId": "r1", "name": "Pisarna 1", "roomType": "office", "zone": "work",     "w": 4200, "d": 5000, "bbox": { "x": 0.12, "y": 0.20, "w": 0.18, "h": 0.25 } },
-    { "sourceId": "r2", "name": "WC moški",   "roomType": "wc", "wcKind": "male",   "zone": "sanitary", "w": 2400, "d": 2200, "bbox": { "x": 0.62, "y": 0.10, "w": 0.10, "h": 0.09 } },
-    { "sourceId": "r3", "name": "WC ženski",  "roomType": "wc", "wcKind": "female", "zone": "sanitary", "w": 2400, "d": 2200, "bbox": { "x": 0.62, "y": 0.20, "w": 0.10, "h": 0.09 } }
+    { "sourceId": "r1", "name": "Pisarna 1", "roomType": "office", "zone": "work",     "w": 4200, "d": 5000, "bbox": { "x": 0.12, "y": 0.20, "w": 0.18, "h": 0.25 },
+      "elements": [ { "sourceId": "r1-e1", "name": "Pisalna miza", "elementKey": "desk", "x": 300, "y": 3600, "w": 1400, "d": 800, "facing": "N" } ] },
+    { "sourceId": "r2", "name": "WC moški",   "roomType": "wc", "wcKind": "male",   "zone": "sanitary", "w": 2400, "d": 2200, "bbox": { "x": 0.62, "y": 0.10, "w": 0.10, "h": 0.09 },
+      "elements": [ { "sourceId": "r2-e1", "name": "WC školjka", "elementKey": "toilet", "x": 200, "y": 1400, "w": 400, "d": 600, "facing": "N" } ] },
+    { "sourceId": "r3", "name": "WC ženski",  "roomType": "wc", "wcKind": "female", "zone": "sanitary", "w": 2400, "d": 2200, "bbox": { "x": 0.62, "y": 0.20, "w": 0.10, "h": 0.09 }, "elements": [] }
   ]
 }
 
@@ -30,6 +32,11 @@ Pravila:
 - corridors.role je "main" (širša hrbtenica) ali "side" (ožji povezovalni hodnik).
 - w = širina, d = globina prostora v mm. Če meri ni, oceni iz merila/legende.
 - bbox = pravokotnik prostora na sliki v DELEŽIH (x,y = zgornji levi kot, w,h = širina/višina; vse 0..1). Obvezen za vsak prostor, da lahko preverimo ujemanje.
+- elements (neobvezno, a zaželeno kjer je oprema čitljiva): oprema/pohištvo v prostoru.
+  elementKey je eno od: "toilet", "sink", "urinal", "desk", "chair", "cabinet", "shelf".
+  x, y = odmik elementa od zgornjega levega kota PROSTORA v mm; w, d = mere elementa v mm;
+  facing = stran, v katero je element obrnjen ("N" | "E" | "S" | "W"; N = proti manjšemu y).
+  Iz teh meritev se učijo pravila odmikov, zato raje izpusti element, kot da ugibaš mere.
 - Ne izmišljaj prostorov, ki jih na načrtu ni. Vključi vse čitljive prostore.`;
 
 /** Iz morebiti ovitega odgovora (```json ...```) izlušči prvi JSON objekt. */
@@ -54,6 +61,35 @@ function parseBBox(value: unknown): BBox | undefined {
 
 const VALID_ROOM_TYPES: RoomType[] = ['office', 'wc', 'corridor'];
 const VALID_WC_KINDS: WcKind[] = ['male', 'female', 'unisex'];
+const VALID_FACINGS = new Set(['N', 'E', 'S', 'W']);
+
+/**
+ * Elementi so za indukcijo pravil dragoceni, a neobvezni: posamezen okvarjen
+ * element se IZPUSTI (ne podre celega uvoza) — ekstrakcija mora biti robustna.
+ */
+function parseElements(value: unknown, roomIndex: number): NormalizedIfcElement[] {
+  if (!Array.isArray(value)) return [];
+  const elements: NormalizedIfcElement[] = [];
+  value.forEach((item, index) => {
+    const el = (item ?? {}) as Record<string, unknown>;
+    const nums = ['x', 'y', 'w', 'd'].map((key) => {
+      const n = typeof el[key] === 'string' ? Number(el[key]) : el[key];
+      return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : NaN;
+    });
+    if (!el.elementKey || nums.some((n) => Number.isNaN(n)) || nums[2] <= 0 || nums[3] <= 0) return;
+    elements.push({
+      sourceId: String(el.sourceId || `room-${roomIndex + 1}-el-${index + 1}`),
+      name: String(el.name || String(el.elementKey)),
+      elementKey: String(el.elementKey),
+      x: Math.round(nums[0]),
+      y: Math.round(nums[1]),
+      w: Math.round(nums[2]),
+      d: Math.round(nums[3]),
+      facing: VALID_FACINGS.has(String(el.facing)) ? (String(el.facing) as NormalizedIfcElement['facing']) : 'N',
+    });
+  });
+  return elements;
+}
 
 function num(value: unknown, field: string): number {
   const n = typeof value === 'string' ? Number(value) : value;
@@ -100,7 +136,7 @@ export function parseAiExtractedPlan(input: string | unknown): NormalizedIfcPlan
       w: Math.round(num(room.w, `rooms[${index}].w`)),
       d: Math.round(num(room.d, `rooms[${index}].d`)),
       bbox: parseBBox(room.bbox),
-      elements: [],
+      elements: parseElements(room.elements, index),
     };
   });
 
