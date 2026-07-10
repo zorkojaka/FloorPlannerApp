@@ -1,5 +1,10 @@
 import type { NormalizedIfcPlan } from '../ifc/normalizedPlan';
-import { extractFloorStrategyObservations, induceFloorStrategyProfile, type FloorStrategyProfile } from '../ifc/floorStrategy';
+import {
+  extractFloorStrategyObservations,
+  induceFloorStrategyProfile,
+  type FloorStrategyObservation,
+  type FloorStrategyProfile,
+} from '../ifc/floorStrategy';
 import { observationsFromNormalizedPlan } from '../ifc/observations';
 import { induceRules, type InducedRule, type ReferenceObservation } from '../rules/induction';
 import { projectTrainingFromNormalizedPlan, type ProjectTrainingResult } from './projectTraining';
@@ -123,6 +128,77 @@ export type RoomRuleSets = Record<string, InducedRule[]>;
  * štejejo), nato obstoječa indukcija (min→jedro, mediana→halo, p90→nasičenje,
  * varianca→zaupanje). Zamenjava WC referenc spremeni samo WC pravila.
  */
+// ── Holdout validacija etažne indukcije (FP-007, merilna os a) ────────────────
+// Leave-one-out: profil se nauči na vseh etažnih referencah RAZEN ene, nato se
+// preveri, kako dobro napove zadržano. Številka ujemanja za VSAK parameter.
+
+export interface FloorHoldoutParameter {
+  metric: FloorStrategyObservation['metric'];
+  label: string;
+  /** 0..1 — kako dobro se je profil (naučen brez zadržane reference) ujel z njo */
+  match: number;
+  samples: number;
+}
+
+export interface FloorHoldoutReport {
+  referenceCount: number;
+  /** povprečno ujemanje čez vse parametre */
+  score: number;
+  parameters: FloorHoldoutParameter[];
+}
+
+const HOLDOUT_METRIC_LABELS: Record<FloorStrategyObservation['metric'], string> = {
+  'wc-cluster': 'WC gruča',
+  'wc-dispersion': 'WC razpršenost',
+  'internal-corridor-count': 'notranji hodniki',
+  'corridor-width-main': 'širina glavnega hodnika',
+  'corridor-width-side': 'širina stranskih hodnikov',
+  'corridor-ratio': 'delež hodnikov',
+};
+
+/** predicted iz profila + način primerjave: relativno (mere) ali absolutno (deleži 0..1) */
+function holdoutPrediction(profile: FloorStrategyProfile, metric: FloorStrategyObservation['metric'], actual: number): { predicted: number; actual: number; relative: boolean } {
+  if (metric === 'wc-cluster') return { predicted: profile.preferClusteredWc, actual, relative: false };
+  if (metric === 'wc-dispersion') return { predicted: profile.preferSpreadWc, actual, relative: false };
+  if (metric === 'internal-corridor-count') return { predicted: profile.preferInternalCorridors, actual: Math.min(1, actual / 2), relative: false };
+  if (metric === 'corridor-width-main') return { predicted: profile.mainCorridorWidth, actual, relative: true };
+  if (metric === 'corridor-width-side') return { predicted: profile.sideCorridorWidth, actual, relative: true };
+  return { predicted: profile.corridorRatio, actual, relative: false };
+}
+
+export function floorHoldoutReport(library: ReferenceLibrary): FloorHoldoutReport | null {
+  const floors = referencesOfKind(library, 'floor');
+  if (floors.length < 2) return null;
+
+  const matchesByMetric = new Map<FloorStrategyObservation['metric'], number[]>();
+  for (let held = 0; held < floors.length; held += 1) {
+    const trainObservations = floors.filter((_, i) => i !== held).flatMap((ref) => extractFloorStrategyObservations(ref.plan));
+    const profile = induceFloorStrategyProfile('holdout', trainObservations);
+    const heldObservations = extractFloorStrategyObservations(floors[held].plan);
+
+    const byMetric = new Map<FloorStrategyObservation['metric'], number[]>();
+    for (const observation of heldObservations) {
+      byMetric.set(observation.metric, [...(byMetric.get(observation.metric) || []), observation.value]);
+    }
+    for (const [metric, values] of byMetric) {
+      const actualAvg = values.reduce((sum, value) => sum + value, 0) / values.length;
+      const { predicted, actual, relative } = holdoutPrediction(profile, metric, actualAvg);
+      const error = Math.abs(predicted - actual) / (relative ? Math.max(Math.abs(actual), 1) : 1);
+      const match = Math.max(0, 1 - Math.min(1, error));
+      matchesByMetric.set(metric, [...(matchesByMetric.get(metric) || []), match]);
+    }
+  }
+
+  const parameters: FloorHoldoutParameter[] = [...matchesByMetric.entries()].map(([metric, matches]) => ({
+    metric,
+    label: HOLDOUT_METRIC_LABELS[metric],
+    match: matches.reduce((sum, value) => sum + value, 0) / matches.length,
+    samples: matches.length,
+  }));
+  const score = parameters.length ? parameters.reduce((sum, parameter) => sum + parameter.match, 0) / parameters.length : 0;
+  return { referenceCount: floors.length, score, parameters };
+}
+
 export function roomRuleSetsFromLibrary(library: ReferenceLibrary): RoomRuleSets {
   const lib = normalizeReferenceLibrary(library);
   const byType = new Map<string, ReferenceObservation[]>();

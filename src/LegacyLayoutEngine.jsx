@@ -31,7 +31,7 @@ import { deriveFloorLayers, ZONE_DEFS, zoneFill, zoneLabel } from "./project/flo
 import { extractFloorStrategyObservations, induceFloorStrategyProfile, rankFloorLayoutsByProfile, scoreFloorLayoutByProfile } from "./ifc/floorStrategy";
 import { IFC_REFERENCE_SETS } from "./training/ifcReferenceSets";
 import { projectTrainingFromIfcSummary, projectTrainingFromNormalizedPlan, normalizedPlanFromSummary } from "./project/projectTraining";
-import { addReference, removeReference, referencesOfKind, referenceSummary, floorTrainingFromLibrary, roomRuleSetsFromLibrary, inferReferenceKind, initialReferenceLibrary, normalizeReferenceLibrary, REFERENCE_KIND_LABELS } from "./project/referenceLibrary";
+import { addReference, removeReference, referencesOfKind, referenceSummary, floorTrainingFromLibrary, floorHoldoutReport, roomRuleSetsFromLibrary, inferReferenceKind, initialReferenceLibrary, normalizeReferenceLibrary, REFERENCE_KIND_LABELS } from "./project/referenceLibrary";
 import { AI_EXTRACTION_PROMPT, parseAiExtractedPlan } from "./ifc/aiExtraction";
 import { extractPlanWithClaude, fileToSource, DEFAULT_EXTRACTION_MODEL } from "./ifc/claudeExtraction";
 
@@ -700,6 +700,11 @@ function O9({library,setLibrary,onOpenProject}){
             </div>)}
           </div>}
       {floorRefs.length>0&&<button className="regen" onClick={applyLibrary}>Uporabi knjižnico v projektu ({floorRefs.length} etažnih → skupni profil)</button>}
+      {(()=>{const h=floorHoldoutReport(refLib);return h&&<div className="ifcTrainingCard">
+        <div className="rHead"><b>Holdout validacija (train/test)</b><span>ujemanje {Math.round(h.score*100)} %</span></div>
+        {h.parameters.map(p=><div key={p.metric} className="ruleMeta">{p.label}: <b>{Math.round(p.match*100)} %</b> · n={p.samples}</div>)}
+        <div className="refs">nauči na {h.referenceCount-1}, preveri na zadržani — čez vse etažne reference</div>
+      </div>;})()}
       {refLib.references.length>0&&<button className="regen" onClick={extractRoomRules}>Izlušči pravila pohištva ({refLib.references.length} referenc → per tip sobe)</button>}
       {Object.keys(roomRules).length>0&&<div className="ifcTrainingList">
         {Object.entries(roomRules).map(([type,rules])=><div key={type} className="ifcTrainingCard">

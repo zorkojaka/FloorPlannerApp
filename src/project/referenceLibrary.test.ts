@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { NormalizedIfcPlan } from '../ifc/normalizedPlan';
 import {
   addReference,
+  floorHoldoutReport,
   floorTrainingFromLibrary,
   inferReferenceKind,
   initialReferenceLibrary,
@@ -143,6 +144,37 @@ function officePlanWithClearance(id: string, clearanceMm: number): NormalizedIfc
     ],
   };
 }
+
+describe('holdout validacija etažne indukcije (FP-007)', () => {
+  it('z manj kot dvema etažnima referencama poročila ni', () => {
+    let lib = initialReferenceLibrary();
+    lib = addReference(lib, { plan: floorPlan('f1', 1800, 2), kind: 'floor' });
+    expect(floorHoldoutReport(lib)).toBeNull();
+  });
+
+  it('enake reference → visoko ujemanje; različne → nižje, za vsak parameter številka', () => {
+    let same = initialReferenceLibrary();
+    same = addReference(same, { plan: floorPlan('a1', 1800, 2), kind: 'floor' });
+    same = addReference(same, { plan: floorPlan('a2', 1800, 2), kind: 'floor' });
+    const sameReport = floorHoldoutReport(same)!;
+    expect(sameReport.referenceCount).toBe(2);
+    expect(sameReport.score).toBeGreaterThan(0.9);
+    expect(sameReport.parameters.length).toBeGreaterThan(0);
+    for (const parameter of sameReport.parameters) {
+      expect(parameter.match).toBeGreaterThanOrEqual(0);
+      expect(parameter.match).toBeLessThanOrEqual(1);
+      expect(parameter.label.length).toBeGreaterThan(0);
+    }
+
+    let diff = initialReferenceLibrary();
+    diff = addReference(diff, { plan: floorPlan('b1', 1200, 3), kind: 'floor' });
+    diff = addReference(diff, { plan: floorPlan('b2', 3200, 0), kind: 'floor' });
+    const diffReport = floorHoldoutReport(diff)!;
+    expect(diffReport.score).toBeLessThan(sameReport.score);
+    const mainWidth = diffReport.parameters.find((parameter) => parameter.metric === 'corridor-width-main')!;
+    expect(mainWidth.match).toBeLessThan(0.7);
+  });
+});
 
 describe('indukcija pravil pohištva per tip sobe (FP-006)', () => {
   it('pravila so ločena per tip sobe in citirajo reference', () => {

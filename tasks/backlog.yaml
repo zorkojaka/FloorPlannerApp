@@ -127,7 +127,7 @@ tasks:
 
   - id: FP-007
     title: Etažna indukcija iz načrtov celih etaž + holdout validacija
-    status: ready
+    status: done
     priority: P1
     effort: M
     agent: Claude Code
@@ -137,7 +137,7 @@ tasks:
       Osnova obstaja (ifc/floorStrategy.ts, project/zoneInduction.ts) — razširi
       na več parametrov in dodaj holdout poročilo (train/test): nauči se na delu
       referenc, preveri napoved na zadržanih (HANDOFF T6, merilna os a).
-    next_step: Razširi floorStrategy + holdout poročilo v UI faze Šolanje.
+    next_step: Izvedeno 2026-07-10 — floorHoldoutReport (leave-one-out čez etažne reference, ujemanje za vsak parameter profila), kartica v knjižnici faze Šolanje; skupni profil iz vseh etažnih referenc že v FP-005.
     depends_on: [FP-005]
     acceptance:
       - Etažne reference spremenijo rangiranje kandidatov etaže brez spremembe kode.
