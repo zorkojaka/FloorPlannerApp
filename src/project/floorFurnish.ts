@@ -144,9 +144,28 @@ export interface FloorFurnishing {
   items: FloorFurnItem[];
 }
 
+/** Prepovedana cona v lokalnih (mm) koordinatah sobe. */
+export interface RoomNoGoZone {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Per-soba popravek: preset, A/B seme (druga postavitev) in prepovedane cone. */
+export interface RoomOverride {
+  presetId?: string;
+  /** izbira A/B različice postavitve pohištva (spremeni seme generatorja) */
+  seed?: number;
+  /** prepovedane cone (lokalno, mm) — engine se jim izogne */
+  zones?: RoomNoGoZone[];
+}
+
+export type RoomChoice = string | RoomOverride;
+
 export function furnishFloorLayout(
   layout: FloorLayout,
-  choices: Record<string, string>,
+  choices: Record<string, RoomChoice>,
 ): FloorFurnishing {
   const library = baseLib();
   const corridors = [layout.corridor, ...(layout.corridorLinks || [])].filter(Boolean);
@@ -155,7 +174,9 @@ export function furnishFloorLayout(
   layout.rooms.forEach((room, index) => {
     if (room.type === 'corridor') return;
 
-    const presetId = choices[room.id] ?? defaultFloorPresetId(room.type);
+    const raw = choices[room.id];
+    const override: RoomOverride = typeof raw === 'string' ? { presetId: raw } : raw || {};
+    const presetId = override.presetId ?? defaultFloorPresetId(room.type);
     const fixtureKeys = findFloorPreset(presetId).fixtures(room);
 
     const doorSide = room.doorSide ?? corridorWall(room, corridors);
@@ -179,7 +200,8 @@ export function furnishFloorLayout(
       soft: true,
       minPathWidth: 550,
       samples: 240,
-      random: mulberry32(9973 * (index + 1) + Math.round(room.w * 1000)),
+      zones: override.zones,
+      random: mulberry32(9973 * (index + 1) + Math.round(room.w * 1000) + (override.seed || 0) * 7919),
     });
 
     const best = res.candidates[0];

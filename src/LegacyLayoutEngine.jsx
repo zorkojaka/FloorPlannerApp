@@ -18,6 +18,7 @@ import { defaultChannels, effectiveWeight, learnChannelsFromPreference, rankByCh
 import { applyInducedRules, induceRules, parseReferenceJson } from "./rules/induction";
 import { clamp, uid } from "./shared/math";
 import { loadJson, saveJson } from "./shared/storage";
+import { downloadBlob, svgToString, planToJson } from "./shared/exportPlan";
 import { ACCESSIBLE_BATHROOM_REFS, CLASSIC_BATHROOM_REFS } from "./training/classicBathroomRefs";
 import { generateFloorLayoutPool } from "./project/floorGenerator";
 import { estimateProjectArea } from "./project/roomTypes";
@@ -67,36 +68,13 @@ export default function App(){
 /* ===================== WORKFLOW (uporabniški pogled) ===================== */
 function Workflow({library,setLibrary}){
   const [phase,setPhase]=usePersistentState("floorplanner.phase","projekt");
-  const [setupLeftPct,setSetupLeftPct]=usePersistentState("floorplanner.setupLeftPct",42);
-  const setupGridRef=useRef(null);
-  const rp=useRoomProject(library);
-  const beginSetupResize=(ev)=>{
-    ev.preventDefault();
-    const grid=setupGridRef.current;
-    if(!grid) return;
-    const rect=grid.getBoundingClientRect();
-    const move=(e)=>{
-      const x=e.clientX??e.touches?.[0]?.clientX;
-      if(x==null) return;
-      setSetupLeftPct(clamp(((x-rect.left)/rect.width)*100,28,62));
-    };
-    const done=()=>{
-      window.removeEventListener("pointermove",move);
-      window.removeEventListener("pointerup",done);
-    };
-    window.addEventListener("pointermove",move);
-    window.addEventListener("pointerup",done);
-    move(ev);
-  };
   const phases=[
-    {id:"faza0",tag:"0",title:"Šolanje",sub:"indukcija — napolni lečo znanja (občasno)"},
-    {id:"projekt",tag:"P",title:"Projekt",sub:"sobe + hodniki — A/B izbor etaže"},
-    {id:"korak1",tag:"1",title:"Elementi",sub:"knjižnica — priklopi, dimenzije, uporaba"},
-    {id:"korak2",tag:"2",title:"Omejitve sobe",sub:"velikost, vrata, cone, fiksni elementi"},
-    {id:"korak3",tag:"3",title:"Generiranje in izbiranje",sub:"variacije + A/B aktivno učenje"},
+    {id:"projekt",tag:"P",title:"Projekt",sub:"vhod → prostori → pohištvo → izvoz"},
+    {id:"faza0",tag:"Š",title:"Šolanje",sub:"uči iz primerov (občasno)"},
+    {id:"korak1",tag:"E",title:"Elementi",sub:"knjižnica pohištva"},
   ];
   return <div className="wf">
-    <div className="phaseNav">
+    <div className="phaseNav phaseNav3">
       {phases.map(p=>(
         <button key={p.id} className={"phaseBtn "+(phase===p.id?"on":"")+(p.id==="faza0"?" sep":"")} onClick={()=>setPhase(p.id)}>
           <span className="phaseTag">{p.tag}</span>
@@ -104,25 +82,9 @@ function Workflow({library,setLibrary}){
         </button>
       ))}
     </div>
-    {phase==="faza0" && <div className="phaseBody"><div className="phaseLead">Faza 0 — šolanje: vržeš noter primere dobre prakse, sistem izlušči znanje (envelope, prior kanalov). Zgodi se enkrat/občasno, ne pri vsakem projektu.</div><O9 library={library} setLibrary={setLibrary} onOpenProject={()=>setPhase("projekt")}/></div>}
-    {phase==="projekt" && <ProjectWorkflow onContinue={(room)=>{if(room)rp.applyRoomConstraints(roomConstraintsFromPlacedRoom(room));setPhase("korak2");}}/>}
+    {phase==="projekt" && <ProjectWorkflow/>}
+    {phase==="faza0" && <div className="phaseBody"><div className="phaseLead">Šolanje — vržeš noter primere dobre prakse, sistem izlušči znanje. Zgodi se občasno, ne pri vsakem projektu; za posamezno sobo (postavitev pohištva) ali za celo etažo (razporeditev sob in hodnikov).</div><O9 library={library} setLibrary={setLibrary} onOpenProject={()=>setPhase("projekt")}/></div>}
     {phase==="korak1" && <div className="phaseBody"><O1 library={library} setLibrary={setLibrary}/></div>}
-    {phase==="korak2" && <div className="phaseBody">
-      <div className="phaseLead">Korak 2 — omejitve sobe: »tako je«. Velikost, vrata, prepovedane cone, fiksni elementi. Ta nabor je vmesnik, ki ga kasneje napolni engine za razporeditev sob.</div>
-      <div ref={setupGridRef} className="grid2c setupGrid resizableSetup" style={{"--setup-left":`${setupLeftPct}%`}}>
-        <ConstraintsPanel rp={rp} library={library}/>
-        <button className="colResize" onPointerDown={beginSetupResize} title="Povleci za širino risbe" aria-label="Nastavi širino stolpcev"><span/></button>
-        <StagePanel rp={rp} library={library}/>
-      </div>
-      <div className="phaseCta"><button className="ctaNext" onClick={()=>setPhase("korak3")}>Naprej → generiranje in izbiranje</button></div>
-    </div>}
-    {phase==="korak3" && <div className="phaseBody">
-      <div className="phaseLead">Korak 3 — generiranje in izbiranje: engine vrže variacije, ti izbiraš boljše. A/B par izbere aktivno učenje (»Ugani kdo«) po informacijskem donosu.</div>
-      <div className="grid2c wide">
-        <ABStagePanel rp={rp}/>
-        <ReviewPanel rp={rp} showAB={false} showBench={false}/>
-      </div>
-    </div>}
   </div>;
 }
 
@@ -150,6 +112,9 @@ function ProjectWorkflow({onContinue}){
   const [furnChoices,setFurnChoices]=usePersistentState("floorplanner.project.furnChoices",{});
   const [floorLayer,setFloorLayer]=usePersistentState("floorplanner.project.floorLayer","rooms");
   const [flowKind,setFlowKind]=usePersistentState("floorplanner.project.flowKind","all");
+  const [projektStep,setProjektStep]=usePersistentState("floorplanner.project.step",1);
+  const [pickedLayoutId,setPickedLayoutId]=usePersistentState("floorplanner.project.pickedLayoutId",null);
+  const exportRef=useRef(null);
   const updateBoundary=(patch)=>setBrief(b=>({...b,boundary:{...b.boundary,...patch}}));
   const updateRoom=(type,patch)=>setBrief(b=>({...b,rooms:b.rooms.map(r=>r.type===type?{...r,...patch}:r)}));
   const upsertRoom=(id,type,patch)=>setBrief(b=>{
@@ -175,7 +140,9 @@ function ProjectWorkflow({onContinue}){
   const removeEntrance=(id)=>setBrief(b=>({...b,entrances:entrances.filter(e=>e.id!==id)}));
   const pool=useMemo(()=>generateFloorLayoutPool(brief),[brief]);
   const ranked=useMemo(()=>strategyProfile?rankFloorLayoutsByProfile(pool,strategyProfile):rankFloorLayouts(pool,pref.weights),[pool,pref.weights,strategyProfile]);
-  const champion=strategyProfile?ranked[0]:(ranked.find(l=>l.id===pref.championId)||ranked[0]);
+  const champion=(pickedLayoutId&&ranked.find(l=>l.id===pickedLayoutId))||(strategyProfile?ranked[0]:(ranked.find(l=>l.id===pref.championId)||ranked[0]));
+  const top5=ranked.slice(0,5);
+  const scorePct=(l)=>Math.round((strategyProfile?scoreFloorLayoutByProfile(l,strategyProfile):scoreFloorLayout(l,pref.weights))*100);
   const challengers=ranked.filter(l=>!champion||l.id!==champion.id);
   const challenger=challengers[pairIndex%Math.max(1,challengers.length)]||ranked[1]||champion;
   const pair=[champion,challenger].filter(Boolean);
@@ -187,12 +154,28 @@ function ProjectWorkflow({onContinue}){
   const equalFloor=()=>setPairIndex(i=>i+1);
   const summary=estimateProjectArea(brief);
   const selectedRoom=champion?.rooms.find(r=>r.id===selectedRoomId)||champion?.rooms[0];
-  const furnishing=useMemo(()=>furnishOn&&champion?furnishFloorLayout(champion,furnChoices):{results:[],items:[]},[furnishOn,champion,furnChoices]);
+  const furnishOnStep=furnishOn||projektStep>=3;
+  const furnishing=useMemo(()=>furnishOnStep&&champion?furnishFloorLayout(champion,furnChoices):{results:[],items:[]},[furnishOnStep,champion,furnChoices]);
   const furnRooms=furnishing.results;
   const furnOk=furnRooms.filter(r=>r.status==="found"||r.status==="empty").length;
-  const setFurnChoice=(roomId,presetId)=>setFurnChoices(c=>({...c,[roomId]:presetId}));
+  // per-soba override (preset/seed/zones) — vrednost furnChoices je lahko string (star zapis) ali objekt
+  const roomOverride=(id)=>{const v=furnChoices[id];return typeof v==="object"&&v?v:v?{presetId:v}:{};};
+  const roomPreset=(id,type)=>roomOverride(id).presetId??defaultFloorPresetId(type);
+  const patchRoom=(id,patch)=>setFurnChoices(c=>({...c,[id]:{...(typeof c[id]==="object"&&c[id]?c[id]:c[id]?{presetId:c[id]}:{}),...patch}}));
+  const setFurnChoice=(roomId,presetId)=>patchRoom(roomId,{presetId});
   const floorLayers=useMemo(()=>champion?deriveFloorLayers(champion):null,[champion]);
   const activeLayer=furnishOn?"rooms":floorLayer;
+  // drill-down: A/B za izbrano sobo (trenutno seme vs naslednje) — le v koraku Pohištvo
+  const drillRoom=projektStep>=3?champion?.rooms.find(r=>r.id===selectedRoomId&&r.type!=="corridor"):null;
+  const drillSeed=roomOverride(drillRoom?.id)?.seed||0;
+  const drillAlt=useMemo(()=>{
+    if(!champion||!drillRoom) return null;
+    const f=furnishFloorLayout(champion,{...furnChoices,[drillRoom.id]:{...roomOverride(drillRoom.id),seed:drillSeed+1}});
+    return f.results.find(r=>r.room.id===drillRoom.id);
+  },[champion,drillRoom?.id,furnChoices,drillSeed]);
+  const drillCur=drillRoom?furnRooms.find(r=>r.room.id===drillRoom.id):null;
+  const exportSvg=()=>{const el=exportRef.current;if(el)downloadBlob(`etaza-${champion?.boundary.width}x${champion?.boundary.depth}.svg`,"image/svg+xml",svgToString(el));};
+  const exportJson=()=>{if(champion)downloadBlob(`etaza-${champion.boundary.width}x${champion.boundary.depth}.json`,"application/json",JSON.stringify(planToJson(champion,furnishing,floorLayers),null,2));};
   const floorLayersView=useMemo(()=>{
     if(!floorLayers||activeLayer!=="flows"||flowKind==="all") return floorLayers;
     return {...floorLayers,flows:floorLayers.flows.filter(f=>f.kind===flowKind)};
@@ -200,128 +183,186 @@ function ProjectWorkflow({onContinue}){
   const maleWc=projectRoom("wc-men","wc","male");
   const femaleWc=projectRoom("wc-women","wc","female");
   const unisexWc=projectRoom("wc-unisex","wc","unisex");
-  return <div className="phaseBody">
-    <div className="phaseLead">Projekt — najprej razporedimo sobe in hodnike v dano kvadraturo. To je vmesni A/B korak: izbereš boljši tloris etaže, sistem pa se uči preference pred notranjo razporeditvijo sob.</div>
-    <div className="projectGrid">
-      <aside className="col projectInputs">
-        <div className="eyebrow">Okvir etaže</div>
-        <ProjectNum label="Površina" unit="m²" v={brief.boundary.area} set={v=>updateBoundary({area:v,width:brief.boundary.width,depth:round1(v/Math.max(brief.boundary.width||1,1))})} min={20} max={2500} step={5}/>
-        <ProjectNum label="Širina" unit="m" v={brief.boundary.width} set={v=>updateBoundary({width:v,area:round1(v*(brief.boundary.depth||1))})} min={4} max={120} step={0.5}/>
-        <ProjectNum label="Globina" unit="m" v={brief.boundary.depth} set={v=>updateBoundary({depth:v,area:round1((brief.boundary.width||1)*v)})} min={4} max={80} step={0.5}/>
-        <div className="eyebrow mt">Glavni vhodi</div>
-        <div className="entranceList">
-          {entrances.map((entry,i)=><div key={entry.id} className="entranceItem">
-            <div className="zTop"><span>vhod {i+1}</span><button onClick={()=>removeEntrance(entry.id)} disabled={entrances.length<=1}>×</button></div>
-            <div className="dRow"><span>zid</span><div className="rt3 wrap">{[["N","S"],["E","V"],["S","J"],["W","Z"]].map(([v,l])=><button key={v} className={entry.wall===v?"on":""} onClick={()=>setEntrance(entry.id,{wall:v})}>{l}</button>)}</div></div>
-            <ProjectNum label="Pozicija" unit="%" v={Math.round((entry.position??0.5)*100)} set={v=>setEntrance(entry.id,{position:clamp(v/100,0,1)})} min={0} max={100} step={5}/>
-            <ProjectNum label="Širina" unit="m" v={entry.width??1.2} set={v=>setEntrance(entry.id,{width:v})} min={0.8} max={3} step={0.1}/>
-          </div>)}
-        </div>
-        <button className="add" onClick={addEntrance}>+ vhod</button>
-        <div className="eyebrow mt">Širine hodnikov</div>
-        <ProjectNum label="Minimalna" unit="m" v={corridorPolicy.minWidth} set={v=>updateCorridorPolicy({minWidth:v})} min={0.9} max={3} step={0.1}/>
-        <ProjectNum label="Glavni hodnik" unit="m" v={corridorPolicy.mainWidth} set={v=>updateCorridorPolicy({mainWidth:v})} min={0.9} max={4} step={0.1}/>
-        <ProjectNum label="Stranski hodnik" unit="m" v={corridorPolicy.sideWidth} set={v=>updateCorridorPolicy({sideWidth:v})} min={0.9} max={4} step={0.1}/>
-        <div className="softNote">Glavni hodnik je širša hrbtenica; stranski hodniki povežejo vhode do nje. Kasneje te širine induciramo iz IFC referenc.</div>
-        <div className="eyebrow mt">Dokaz učenja</div>
-        <div className="presetRow">
-          <button onClick={()=>{setStrategyProfile(makeStrategyProfile("central"));setPairIndex(0);}}>Centralni WC</button>
-          <button onClick={()=>{setStrategyProfile(makeStrategyProfile("dispersed"));setPairIndex(0);}}>Razpršeni WC</button>
-        </div>
-        {strategyProfile&&<div className="softNote">Aktiven profil: <b>{strategyProfile.name}</b> · cluster {Math.round(strategyProfile.preferClusteredWc*100)} · spread {Math.round(strategyProfile.preferSpreadWc*100)} · križni hodniki {Math.round(strategyProfile.preferInternalCorridors*100)}</div>}
-        <div className="eyebrow mt">Program sob</div>
-        <ProjectNum label="Moški WC" unit="" v={maleWc.count??0} set={v=>upsertRoom(maleWc.id,"wc",{wcKind:"male",count:Math.round(v)})} min={0} max={30} step={1}/>
-        <ProjectNum label="Ženski WC" unit="" v={femaleWc.count??0} set={v=>upsertRoom(femaleWc.id,"wc",{wcKind:"female",count:Math.round(v)})} min={0} max={30} step={1}/>
-        <ProjectNum label="Unisex WC" unit="" v={unisexWc.count??0} set={v=>upsertRoom(unisexWc.id,"wc",{wcKind:"unisex",count:Math.round(v)})} min={0} max={30} step={1}/>
-        <ProjectNum label="Pisarne" unit="" v={brief.rooms.find(r=>r.type==="office")?.count??0} set={v=>updateRoom("office",{count:Math.round(v)})} min={0} max={100} step={1}/>
-        <ProjectNum label="Mest / pisarno" unit="" v={brief.rooms.find(r=>r.type==="office")?.workstations??1} set={v=>updateRoom("office",{workstations:Math.round(v)})} min={1} max={8} step={1}/>
-        <div className="metricStack">
-          <span>program <b>{summary.roomArea.toFixed(1)} m²</b></span>
-          <span>hodnik ocena <b>{summary.corridorArea.toFixed(1)} m²</b></span>
-          <span>skupaj <b>{summary.totalArea.toFixed(1)} m²</b></span>
-          <span className={summary.fitsBoundary?"ok":"bad"}>{summary.fitsBoundary?"gre v kvadraturo":"presega kvadraturo"} <b>{summary.remainingArea.toFixed(1)} m²</b></span>
-        </div>
-      </aside>
-      <main className="projectStage">
-        <div className="floorProgress">
-          <span>Kandidati <b className="mono">{pool.length}</b></span>
-          <span>Primerjave <b className="mono">{pref.comparisons}</b></span>
-          <span>Prvak <b className="mono">{champion?.id||"-"}</b></span>
-        </div>
-        <div className={"floorBest"+(furnishOn?" furnished":"")}>
-          <div className="floorHead">
-            <b>{furnishOn?"Opremljena etaža (Korak F)":"Trenutno najboljša etaža"}</b>
-            <div className="floorHeadTools">
-              {!furnishOn&&<span className="layerSwitch">
-                {[["rooms","Prostori"],["zones","Cone"],["flows","Tokovi"]].map(([id,lbl])=>
-                  <button key={id} className={floorLayer===id?"on":""} onClick={()=>setFloorLayer(id)}>{lbl}</button>)}
-              </span>}
-              <button className={"furnToggle"+(furnishOn?" on":"")} onClick={()=>setFurnishOn(v=>!v)}>{furnishOn?"◧ nazaj na tloris":"⊞ opremi celo etažo"}</button>
-            </div>
-          </div>
-          {champion&&<FloorSvg layout={champion} floorItems={furnishOn?furnishing.items:null} layer={activeLayer} layers={activeLayer==="flows"?floorLayersView:floorLayers}/>}
-          {!furnishOn&&activeLayer==="zones"&&<div className="furnBar">
-            <span className="furnLegend">
-              {ZONE_DEFS.filter(z=>Object.values(floorLayers?.zoneByRoom||{}).includes(z.id)).map(z=>
-                <span key={z.id}><i style={{background:z.fill}}/>{z.label}</span>)}
-            </span>
-          </div>}
-          {!furnishOn&&activeLayer==="flows"&&<div className="furnBar">
-            <span className="layerSwitch">
-              {[["all","Vse"],["people","Ljudje"],["material","Material"],["waste","Odpadki"]].map(([id,lbl])=>
-                <button key={id} className={flowKind===id?"on":""} onClick={()=>setFlowKind(id)}>{lbl}</button>)}
-            </span>
-            <span className="furnLegend">{(floorLayersView?.flows||[]).map(f=><span key={f.kind}><i style={{background:f.color}}/>{f.label}</span>)}</span>
-            <span className="furnBadge">GMP ločevanje: ljudje po sredini, material in odpadki po ločenih sledeh (odpadki na nasprotni izhod)</span>
-          </div>}
-          {furnishOn&&<div className="furnBar">
-            <span className={"furnBadge"+(furnOk===furnRooms.length?" ok":"")}>{furnOk}/{furnRooms.length} prostorov opremljenih</span>
-            <span className="furnLegend">
-              <i style={{background:"#5b9bd0"}}/>miza <i style={{background:"#89b4da"}}/>stol <i style={{background:"#caa14e"}}/>omara/regal <i style={{background:"#3fb0b0"}}/>WC <i style={{background:"#e2553f"}}/>vrata
-            </span>
-          </div>}
-          {furnishOn&&<div className="furnRooms">
-            {furnRooms.map(fr=><div key={fr.room.id} className="furnRoom">
-              <div className="furnRoomHd"><b>{fr.room.name}</b><span className={"furnStat "+fr.status}>{({found:"✓",empty:"vrata",["not-found"]:"ni šlo",infeasible:"neizv."})[fr.status]}</span></div>
-              <select value={furnChoices[fr.room.id]??defaultFloorPresetId(fr.room.type)} onChange={e=>setFurnChoice(fr.room.id,e.target.value)}>
-                {FLOOR_FURN_PRESETS.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}
-              </select>
+  void selectedRoom; void onContinue;
+  return <div className="phaseBody projektWizard">
+    <div className="wizSteps">
+      {[[1,"Vhod / omejitve"],[2,"Razporeditev prostorov"],[3,"Razporeditev pohištva"],[4,"Pregled in izvoz"]].map(([n,l])=>
+        <button key={n} className={"wizStep"+(projektStep===n?" on":projektStep>n?" done":"")} onClick={()=>setProjektStep(n)}>
+          <span className="wizNum">{n}</span><b>{l}</b>
+        </button>)}
+    </div>
+
+    {projektStep===1&&<div className="wizBody">
+      <div className="phaseLead">Korak 1 — s čim delamo in kakšne so omejitve: okvir etaže, vhodi, hodniki, program sob. Predogled desno se sproti prilagodi.</div>
+      <div className="projectGrid step1grid">
+        <aside className="col projectInputs">
+          <div className="eyebrow">Okvir etaže</div>
+          <ProjectNum label="Površina" unit="m²" v={brief.boundary.area} set={v=>updateBoundary({area:v,width:brief.boundary.width,depth:round1(v/Math.max(brief.boundary.width||1,1))})} min={20} max={2500} step={5}/>
+          <ProjectNum label="Širina" unit="m" v={brief.boundary.width} set={v=>updateBoundary({width:v,area:round1(v*(brief.boundary.depth||1))})} min={4} max={120} step={0.5}/>
+          <ProjectNum label="Globina" unit="m" v={brief.boundary.depth} set={v=>updateBoundary({depth:v,area:round1((brief.boundary.width||1)*v)})} min={4} max={80} step={0.5}/>
+          <div className="eyebrow mt">Glavni vhodi</div>
+          <div className="entranceList">
+            {entrances.map((entry,i)=><div key={entry.id} className="entranceItem">
+              <div className="zTop"><span>vhod {i+1}</span><button onClick={()=>removeEntrance(entry.id)} disabled={entrances.length<=1}>×</button></div>
+              <div className="dRow"><span>zid</span><div className="rt3 wrap">{[["N","S"],["E","V"],["S","J"],["W","Z"]].map(([v,l])=><button key={v} className={entry.wall===v?"on":""} onClick={()=>setEntrance(entry.id,{wall:v})}>{l}</button>)}</div></div>
+              <ProjectNum label="Pozicija" unit="%" v={Math.round((entry.position??0.5)*100)} set={v=>setEntrance(entry.id,{position:clamp(v/100,0,1)})} min={0} max={100} step={5}/>
+              <ProjectNum label="Širina" unit="m" v={entry.width??1.2} set={v=>setEntrance(entry.id,{width:v})} min={0.8} max={3} step={0.1}/>
             </div>)}
-          </div>}
+          </div>
+          <button className="add" onClick={addEntrance}>+ vhod</button>
+          <div className="eyebrow mt">Širine hodnikov</div>
+          <ProjectNum label="Minimalna" unit="m" v={corridorPolicy.minWidth} set={v=>updateCorridorPolicy({minWidth:v})} min={0.9} max={3} step={0.1}/>
+          <ProjectNum label="Glavni hodnik" unit="m" v={corridorPolicy.mainWidth} set={v=>updateCorridorPolicy({mainWidth:v})} min={0.9} max={4} step={0.1}/>
+          <ProjectNum label="Stranski hodnik" unit="m" v={corridorPolicy.sideWidth} set={v=>updateCorridorPolicy({sideWidth:v})} min={0.9} max={4} step={0.1}/>
+          <div className="eyebrow mt">Strateški profil (šolanje)</div>
+          <div className="presetRow">
+            <button onClick={()=>{setStrategyProfile(makeStrategyProfile("central"));setPairIndex(0);}}>Centralni WC</button>
+            <button onClick={()=>{setStrategyProfile(makeStrategyProfile("dispersed"));setPairIndex(0);}}>Razpršeni WC</button>
+            {strategyProfile&&<button className="champStay" onClick={()=>setStrategyProfile(null)}>brez</button>}
+          </div>
+          {strategyProfile&&<div className="softNote">Aktiven profil: <b>{strategyProfile.name}</b> · cluster {Math.round(strategyProfile.preferClusteredWc*100)} · spread {Math.round(strategyProfile.preferSpreadWc*100)}</div>}
+          <div className="eyebrow mt">Program sob</div>
+          <ProjectNum label="Moški WC" unit="" v={maleWc.count??0} set={v=>upsertRoom(maleWc.id,"wc",{wcKind:"male",count:Math.round(v)})} min={0} max={30} step={1}/>
+          <ProjectNum label="Ženski WC" unit="" v={femaleWc.count??0} set={v=>upsertRoom(femaleWc.id,"wc",{wcKind:"female",count:Math.round(v)})} min={0} max={30} step={1}/>
+          <ProjectNum label="Unisex WC" unit="" v={unisexWc.count??0} set={v=>upsertRoom(unisexWc.id,"wc",{wcKind:"unisex",count:Math.round(v)})} min={0} max={30} step={1}/>
+          <ProjectNum label="Pisarne" unit="" v={brief.rooms.find(r=>r.type==="office")?.count??0} set={v=>updateRoom("office",{count:Math.round(v)})} min={0} max={100} step={1}/>
+          <ProjectNum label="Mest / pisarno" unit="" v={brief.rooms.find(r=>r.type==="office")?.workstations??1} set={v=>updateRoom("office",{workstations:Math.round(v)})} min={1} max={8} step={1}/>
+          <div className="metricStack">
+            <span>program <b>{summary.roomArea.toFixed(1)} m²</b></span>
+            <span>hodnik ocena <b>{summary.corridorArea.toFixed(1)} m²</b></span>
+            <span>skupaj <b>{summary.totalArea.toFixed(1)} m²</b></span>
+            <span className={summary.fitsBoundary?"ok":"bad"}>{summary.fitsBoundary?"gre v kvadraturo":"presega kvadraturo"} <b>{summary.remainingArea.toFixed(1)} m²</b></span>
+          </div>
+        </aside>
+        <div className="wizPreview">
+          <div className="floorHead"><b>Predogled razporeditve</b><span className="mono">{pool.length} kandidatov</span></div>
+          {champion&&<FloorSvg layout={champion}/>}
+          <div className="softNote">Spremeni širino/globino ali program — razporeditev se samodejno posodobi (ni treba od začetka).</div>
         </div>
-        <div className="floorPair">
-          {pair.map((layout,i)=><div key={layout.id} className="floorCard">
-            <div className="floorHead"><b>{i===0?"A":"B"} · score {((strategyProfile?scoreFloorLayoutByProfile(layout,strategyProfile):scoreFloorLayout(layout,pref.weights))*100).toFixed(0)}</b><span>{layout.variant}</span></div>
-            <FloorSvg layout={layout}/>
-            <FloorSignals layout={layout}/>
-          </div>)}
+      </div>
+      <div className="phaseCta"><button className="ctaNext" onClick={()=>setProjektStep(2)}>Naprej → Razporeditev prostorov</button></div>
+    </div>}
+
+    {projektStep===2&&<div className="wizBody">
+      <div className="phaseLead">Korak 2 — razporeditev prostorov: zgoraj izberi med 5 najboljšimi, spodaj z A/B primerjavo poišči še boljšo (sistem se uči tvoje preference).</div>
+      <div className="floorProgress">
+        <span>Kandidati <b className="mono">{pool.length}</b></span>
+        <span>Primerjave <b className="mono">{pref.comparisons}</b></span>
+        <span>Izbrana <b className="mono">{champion?.id||"-"}</b></span>
+      </div>
+      <div className="eyebrow">Top 5 razporeditev — klikni za izbor</div>
+      <div className="top5">
+        {top5.map((l,i)=><button key={l.id} className={"top5Card"+(champion?.id===l.id?" on":"")} onClick={()=>setPickedLayoutId(l.id)}>
+          <div className="floorHead"><b>#{i+1} · {scorePct(l)}</b>{champion?.id===l.id&&<span className="pill">izbrana</span>}</div>
+          <FloorSvg layout={l}/>
+          <span className="top5Var">{l.variant}</span>
+        </button>)}
+      </div>
+      <div className="eyebrow mt">Poišči še boljšo (A/B)</div>
+      <div className="floorPair">
+        {pair.map((layout,i)=><div key={layout.id} className="floorCard">
+          <div className="floorHead"><b>{i===0?"A":"B"} · {scorePct(layout)}</b><span>{layout.variant}</span></div>
+          <FloorSvg layout={layout}/>
+          <FloorSignals layout={layout}/>
+        </div>)}
+      </div>
+      <div className="abChoiceBtns floorBtns">
+        <button onClick={()=>{chooseFloor(pair[0],pair[1]);setPickedLayoutId(null);}}>A je boljša</button>
+        <button onClick={equalFloor}>enakovredni</button>
+        <button onClick={()=>{chooseFloor(pair[1],pair[0]);setPickedLayoutId(null);}}>B je boljša</button>
+        <button className="champStay" onClick={()=>setPairIndex(i=>i+1)}>naslednji par</button>
+      </div>
+      <div className="phaseCta"><button className="ctaNext" onClick={()=>setProjektStep(3)}>Naprej → Razporeditev pohištva</button></div>
+    </div>}
+
+    {projektStep===3&&<div className="wizBody">
+      <div className="phaseLead">Korak 3 — pohištvo: cela etaža je opremljena. Klikni prostor, ki ni dobro razporejen — spodaj izbereš boljšo postavitev (A/B) ali dodaš prepovedane cone.</div>
+      <div className="floorBest furnished">
+        <div className="floorHead"><b>Opremljena etaža</b><span className={"furnBadge"+(furnOk===furnRooms.length?" ok":"")}>{furnOk}/{furnRooms.length} opremljenih</span></div>
+        {champion&&<FloorSvg layout={champion} floorItems={furnishing.items} onRoomClick={setSelectedRoomId} selectedId={drillRoom?.id}/>}
+        <div className="furnBar"><span className="furnLegend"><i style={{background:"#5b9bd0"}}/>miza <i style={{background:"#89b4da"}}/>stol <i style={{background:"#caa14e"}}/>omara/regal <i style={{background:"#3fb0b0"}}/>WC <i style={{background:"#e2553f"}}/>vrata</span></div>
+      </div>
+      {drillRoom
+        ? <RoomDrill room={drillRoom} cur={drillCur} alt={drillAlt} preset={roomPreset(drillRoom.id,drillRoom.type)} zones={roomOverride(drillRoom.id).zones||[]}
+            onPreset={p=>setFurnChoice(drillRoom.id,p)} onUseAlt={()=>patchRoom(drillRoom.id,{seed:drillSeed+1})} onZones={z=>patchRoom(drillRoom.id,{zones:z})} onClose={()=>setSelectedRoomId(null)}/>
+        : <div className="softNote">Klikni prostor na tlorisu za per-sobo popravke (A/B postavitev + prepovedane cone).</div>}
+      <div className="phaseCta"><button className="ctaNext" onClick={()=>setProjektStep(4)}>Naprej → Pregled in izvoz</button></div>
+    </div>}
+
+    {projektStep===4&&<div className="wizBody">
+      <div className="phaseLead">Korak 4 — pregled končnega načrta in izvoz. Preklopi pogled: pohištvo, cone (namembnost) ali tokovi (ljudje/material/odpadki).</div>
+      <div className="floorBest furnished">
+        <div className="floorHead"><b>Končni načrt</b>
+          <div className="floorHeadTools">
+            <span className="layerSwitch">{[["rooms","Pohištvo"],["zones","Cone"],["flows","Tokovi"]].map(([id,lbl])=>
+              <button key={id} className={floorLayer===id?"on":""} onClick={()=>setFloorLayer(id)}>{lbl}</button>)}</span>
+          </div>
         </div>
-        <div className="abChoiceBtns floorBtns">
-          <button onClick={()=>chooseFloor(pair[0],pair[1])}>A je boljša</button>
-          <button onClick={equalFloor}>enakovredni</button>
-          <button onClick={()=>chooseFloor(pair[1],pair[0])}>B je boljša</button>
-          <button className="champStay" onClick={()=>{setPairIndex(i=>i+1)}}>trenutna ostane</button>
-        </div>
-      </main>
-      <aside className="col projectExplain">
-        <div className="eyebrow">Kaj se uči</div>
-        <div className="metricStack">
-          {Object.entries(pref.weights).map(([k,v])=><span key={k}>{floorWeightLabel(k)} <b>{Math.round(v*100)}</b></span>)}
-        </div>
-        <div className="softNote">To je isti princip kot A/B pri notranji postavitvi, samo da izbiraš razporeditev sob. Naslednji korak bo, da izbrani kandidat napolni posamezne sobe z opremo.</div>
-        <div className="eyebrow mt">Soba za notranjost</div>
-        <div className="roomPick">
-          {(champion?.rooms||[]).map(room=><button key={room.id} className={selectedRoom?.id===room.id?"on":""} onClick={()=>setSelectedRoomId(room.id)}>
-            <b>{room.name}</b><span>{room.w.toFixed(1)}×{room.d.toFixed(1)} m</span>
-          </button>)}
-        </div>
-        <button className="regen" onClick={()=>onContinue(selectedRoom)}>Naprej → notranjost izbrane sobe</button>
-      </aside>
+        {champion&&<FloorSvg layout={champion} floorItems={floorLayer==="rooms"?furnishing.items:null} layer={floorLayer} layers={floorLayer==="flows"?floorLayersView:floorLayers} svgRef={exportRef}/>}
+        {floorLayer==="zones"&&<div className="furnBar"><span className="furnLegend">{ZONE_DEFS.filter(z=>Object.values(floorLayers?.zoneByRoom||{}).includes(z.id)).map(z=><span key={z.id}><i style={{background:z.fill}}/>{z.label}</span>)}</span></div>}
+        {floorLayer==="flows"&&<div className="furnBar">
+          <span className="layerSwitch">{[["all","Vse"],["people","Ljudje"],["material","Material"],["waste","Odpadki"]].map(([id,lbl])=><button key={id} className={flowKind===id?"on":""} onClick={()=>setFlowKind(id)}>{lbl}</button>)}</span>
+          <span className="furnLegend">{(floorLayersView?.flows||[]).map(f=><span key={f.kind}><i style={{background:f.color}}/>{f.label}</span>)}</span>
+        </div>}
+      </div>
+      <div className="metricStack reviewStats">
+        <span>prostori <b>{champion?.rooms.length||0}</b></span>
+        <span>pisarne <b>{champion?.rooms.filter(r=>r.type==="office").length||0}</b></span>
+        <span>WC <b>{champion?.rooms.filter(r=>r.type==="wc").length||0}</b></span>
+        <span>opremljeni <b>{furnOk}/{furnRooms.length}</b></span>
+        <span>okna <b>{champion?.rooms.filter(r=>r.hasWindow).length||0}</b></span>
+      </div>
+      <div className="presetRow exportRow">
+        <button className="regen" onClick={exportSvg}>⬇ Izvozi SVG</button>
+        <button className="regen" onClick={exportJson}>⬇ Izvozi JSON</button>
+      </div>
+    </div>}
+  </div>;
+}
+
+// Per-soba drill-down (Korak 3): A/B postavitve pohištva + prepovedane cone.
+function RoomDrill({room,cur,alt,preset,zones,onPreset,onUseAlt,onZones,onClose}){
+  const GX=4,GY=3,mmW=Math.round(room.w*1000),mmH=Math.round(room.d*1000);
+  const cellW=mmW/GX,cellH=mmH/GY;
+  const cellZone=(gx,gy)=>({x:Math.round(gx*cellW),y:Math.round(gy*cellH),w:Math.round(cellW),h:Math.round(cellH)});
+  const isOn=(gx,gy)=>{const c=cellZone(gx,gy);return zones.some(z=>Math.abs(z.x-c.x)<2&&Math.abs(z.y-c.y)<2);};
+  const toggle=(gx,gy)=>{const c=cellZone(gx,gy);onZones(isOn(gx,gy)?zones.filter(z=>!(Math.abs(z.x-c.x)<2&&Math.abs(z.y-c.y)<2)):[...zones,c]);};
+  return <div className="roomDrill">
+    <div className="roomDrillHead"><b>{room.name}</b><span>{room.w.toFixed(1)}×{room.d.toFixed(1)} m</span>
+      <select value={preset} onChange={e=>onPreset(e.target.value)}>{FLOOR_FURN_PRESETS.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select>
+      <button className="champStay" onClick={onClose}>zapri ×</button>
+    </div>
+    <div className="roomDrillBody">
+      <div className="roomAB">
+        <div className="roomABcard on"><div className="floorHead"><b>Trenutna</b></div><RoomMiniSvg room={room} items={cur?.items||[]} zones={zones}/></div>
+        <div className="roomABcard"><div className="floorHead"><b>Predlog (A/B)</b><button className="regen" onClick={onUseAlt}>uporabi ta</button></div><RoomMiniSvg room={room} items={alt?.items||[]} zones={zones}/></div>
+      </div>
+      <div className="roomZones">
+        <div className="eyebrow">Prepovedane cone — klikni celico</div>
+        <RoomMiniSvg room={room} items={cur?.items||[]} zones={zones} grid={{GX,GY,isOn,toggle}}/>
+        {zones.length>0&&<button className="champStay" onClick={()=>onZones([])}>počisti cone</button>}
+      </div>
     </div>
   </div>;
 }
 
-function FloorSvg({layout,floorItems,layer="rooms",layers=null}){
+// Mini prikaz ene sobe (lokalne koordinate) z opremo, vrati in prepovedanimi conami.
+function RoomMiniSvg({room,items,zones=[],grid=null}){
+  const W=room.w,D=room.d,pad=0.15;
+  const sw=clamp(Math.max(W,D)*0.01,0.02,0.06);
+  const lx=x=>x-room.x, ly=y=>y-room.y;
+  return <svg className="roomMini" viewBox={`${-pad} ${-pad} ${W+pad*2} ${D+pad*2}`} role="img">
+    <rect x={0} y={0} width={W} height={D} fill="#f6f7f3" stroke="#2b3138" strokeWidth={sw}/>
+    {zones.map((z,i)=><rect key={"z"+i} x={z.x/1000} y={z.y/1000} width={z.w/1000} height={z.h/1000} fill="rgba(226,85,63,0.18)" stroke="#e2553f" strokeWidth={sw*0.6} strokeDasharray={`${sw*3} ${sw*2}`}/>)}
+    {items.map((it,i)=>it.kind==="door"
+      ? <rect key={i} x={lx(it.x)} y={ly(it.y)} width={it.w} height={it.h} fill="#e2553f"/>
+      : <rect key={i} x={lx(it.x)} y={ly(it.y)} width={it.w} height={it.h} fill={furnFill(it.category)} stroke={furnStroke(it.category)} strokeWidth={sw*0.6}/>)}
+    {grid&&Array.from({length:grid.GX*grid.GY}).map((_,k)=>{const gx=k%grid.GX,gy=Math.floor(k/grid.GX);return (
+      <rect key={"g"+k} x={gx*W/grid.GX} y={gy*D/grid.GY} width={W/grid.GX} height={D/grid.GY} fill={grid.isOn(gx,gy)?"rgba(226,85,63,0.28)":"transparent"} stroke="#c2c8cf" strokeWidth={sw*0.35} style={{cursor:"pointer"}} onClick={()=>grid.toggle(gx,gy)}/>);})}
+  </svg>;
+}
+
+function FloorSvg({layout,floorItems,layer="rooms",layers=null,onRoomClick=null,selectedId=null,svgRef=null}){
   const W=layout.boundary.width, D=layout.boundary.depth;
   const pad=clamp(Math.max(W,D)*0.04,0.6,2);
   const fontSize=clamp(Math.max(W,D)*0.018,0.28,1.1);
@@ -331,11 +372,12 @@ function FloorSvg({layout,floorItems,layer="rooms",layers=null}){
   const hasFurn=Array.isArray(floorItems)&&floorItems.length>0;
   const zoneView=layer==="zones"&&layers;
   const flowView=layer==="flows"&&layers;
+  const clickable=(r)=>onRoomClick&&r.type!=="corridor";
   const roomFill=(r)=>zoneView?zoneFill(layers.zoneByRoom[r.id]||"other"):roomColor(r.type);
-  return <svg className="floorSvg" viewBox={vb} role="img">
+  return <svg className="floorSvg" viewBox={vb} role="img" ref={svgRef}>
     <rect x={pad} y={pad} width={W} height={D} fill="#f6f7f3" stroke="#2b3138" strokeWidth={strokeWidth}/>
-    {rooms.map(r=><g key={r.id}>
-      <rect x={pad+r.x} y={pad+r.y} width={r.w} height={r.d} fill={roomFill(r)} opacity={flowView&&r.type!=="corridor"?0.5:1} stroke={r.type==="corridor"?"#8a6d19":"#22313a"} strokeWidth={r.type==="corridor"?strokeWidth*1.5:strokeWidth}/>
+    {rooms.map(r=><g key={r.id} style={clickable(r)?{cursor:"pointer"}:undefined} onClick={clickable(r)?()=>onRoomClick(r.id):undefined}>
+      <rect x={pad+r.x} y={pad+r.y} width={r.w} height={r.d} fill={roomFill(r)} opacity={flowView&&r.type!=="corridor"?0.5:1} stroke={selectedId===r.id?"#16b3b3":r.type==="corridor"?"#8a6d19":"#22313a"} strokeWidth={selectedId===r.id?strokeWidth*3:r.type==="corridor"?strokeWidth*1.5:strokeWidth}/>
       {!(hasFurn&&r.type!=="corridor")&&<text x={pad+r.x+r.w/2} y={pad+r.y+r.d/2} textAnchor="middle" dominantBaseline="middle" fontSize={roomLabelSize(r,fontSize)} fontWeight={r.type==="wc"?"700":"400"} fill="#10161b">{roomLabel(r)}</text>}
       {!hasFurn&&!flowView&&r.doorToCorridor&&(()=>{const d=doorRect(r,strokeWidth);return <rect x={pad+d.x} y={pad+d.y} width={d.w} height={d.h} fill="#e2553f"/>;})()}
       {!hasFurn&&!flowView&&r.type!=="corridor"&&r.hasWindow&&windowBars(r,W,D).map((b,bi)=><rect key={"win"+bi} x={pad+b.x} y={pad+b.y} width={b.w} height={b.h} fill="#eef7ff" stroke="#2f74c0" strokeWidth={strokeWidth*0.5}/>)}
@@ -1767,6 +1809,29 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 @media(max-width:1180px){.grid2c.setupGrid,.grid2c.setupGrid.resizableSetup{grid-template-columns:1fr}.colResize{display:none}}
 .phaseCta{display:flex;justify-content:flex-end;padding:14px 18px;background:var(--panel)}
 .ctaNext{background:#0e2626;border:1px solid #1f4444;color:var(--cy);border-radius:8px;padding:9px 18px;font-size:12.5px;cursor:pointer}.ctaNext:hover{border-color:var(--cy)}
+.phaseNav3{grid-template-columns:repeat(3,1fr)}
+.projektWizard{padding:0}
+.wizSteps{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:12px 14px;border-bottom:1px solid var(--bd)}
+.wizStep{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--bd);border-radius:10px;padding:9px 11px;cursor:pointer;color:var(--mut);text-align:left}
+.wizStep b{font-size:12px;color:var(--tx)}.wizStep.on{border-color:var(--cy);background:#0e1f1f}.wizStep.on b{color:#7fdede}.wizStep.done{border-color:#1f4444}
+.wizNum{width:24px;height:24px;flex:none;display:grid;place-items:center;border:1.5px solid var(--bd);border-radius:7px;font-weight:700;font-size:12px}.wizStep.on .wizNum{border-color:var(--cy);color:#7fdede}.wizStep.done .wizNum{border-color:#2f7d3f;color:#7fdede}
+.wizBody{padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.step1grid{display:grid;grid-template-columns:280px 1fr;gap:14px}
+.wizPreview{background:var(--panel);border:1px solid var(--bd);border-radius:8px;overflow:hidden;align-self:start}
+.top5{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.top5Card{background:var(--panel);border:1px solid var(--bd);border-radius:8px;overflow:hidden;cursor:pointer;padding:0;text-align:left}
+.top5Card.on{border-color:var(--cy);box-shadow:0 0 0 1px var(--cy)}
+.top5Card .floorSvg{height:130px}.top5Var{display:block;font-size:9px;color:var(--mut);padding:5px 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pill{background:#0e2626;color:#7fdede;border:1px solid var(--cy);border-radius:6px;padding:1px 6px;font-size:9px}
+.reviewStats{grid-template-columns:repeat(5,1fr)}.exportRow{gap:10px}
+.roomDrill{background:var(--panel);border:1px solid var(--cy);border-radius:8px;overflow:hidden}
+.roomDrillHead{display:flex;align-items:center;gap:10px;padding:9px 11px;border-bottom:1px solid var(--bd);font-size:12px}.roomDrillHead span{color:var(--mut);font-size:10px}.roomDrillHead select{margin-left:auto}
+.roomDrillBody{display:grid;grid-template-columns:1fr 260px;gap:12px;padding:12px}
+.roomAB{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.roomABcard{border:1px solid var(--bd);border-radius:7px;overflow:hidden}.roomABcard.on{border-color:#2f7d3f}
+.roomMini{width:100%;height:170px;background:#f6f7f3;display:block}
+.roomZones{border-left:1px solid var(--bd);padding-left:12px}
+@media(max-width:900px){.step1grid,.roomDrillBody{grid-template-columns:1fr}.wizSteps{grid-template-columns:1fr 1fr}.top5{grid-template-columns:1fr 1fr}}
 .projectGrid{display:grid;grid-template-columns:260px 1fr 260px;gap:1px;background:var(--bd)}
 .projectStage{background:var(--bg);min-width:0;padding:14px 16px;display:flex;flex-direction:column;gap:12px}
 .floorProgress{display:flex;gap:10px;flex-wrap:wrap;color:var(--mut);font-size:11px}.floorProgress span{background:var(--panel);border:1px solid var(--bd);border-radius:7px;padding:7px 9px}
