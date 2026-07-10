@@ -1,0 +1,208 @@
+# FloorPlanner — strojno berljiv backlog za AI Workbench (go.inteligent.si).
+# Format: backlog-yaml adapter (/opt/go/server/wb/adapters/backlog-yaml.js).
+# Vir vizije: docs/HANDOFF.md, docs/MVPlan.md + pregled 2026-07-10.
+project: floorplanner
+source_of_truth:
+  - handoff: docs/HANDOFF.md
+  - mvp_plan: docs/MVPlan.md
+statuses:
+  - inbox
+  - discovery
+  - ready
+  - in_progress
+  - review
+  - done
+  - blocked
+tasks:
+  # ── Sklop A: testni problem — pametnejši A/B izbor ──────────────────────
+  - id: FP-001
+    title: Aktivni izbor A/B parov na nivoju etaže (najprej raznolike opcije)
+    status: ready
+    priority: P0
+    effort: M
+    agent: Claude Code
+    spec: >-
+      Korak 2 danes primerja prvaka z naslednjim po rangu (LegacyLayoutEngine.jsx:147)
+      — torej med seboj PODOBNE kandidate. Sobni engine že ima aktivno učenje z
+      informacijskim donosom (src/engine/active.ts: pairInformation + nextPair).
+      Prenesi isti princip na FloorLayout: signali iz floorSignals() postanejo
+      kanali z negotovostjo, par se izbere po največjem razdvoju negotovosti
+      (explore) in postopno prehaja na kvaliteto (exploit, suggestedExplore).
+    next_step: Nov modul src/project/floorActive.ts + zamenjava champion-vs-next logike v koraku 2.
+    acceptance:
+      - Prvi pari se med seboj razlikujejo po signalih bolj kot baseline prvak-vs-naslednji (test s povprečno razdaljo signalov).
+      - Po ~10 primerjavah sistem prikazuje pare visoke kvalitete (izkoriščanje).
+      - UI pokaže informacijski donos para (steklena škatla).
+
+  - id: FP-002
+    title: Raznolikost bazena kandidatov etaže (strukturno različne družine)
+    status: ready
+    priority: P0
+    effort: M
+    agent: Claude Code
+    spec: >-
+      generateFloorLayoutPool generira samo variante istega trakastega (strip)
+      generatorja — raznolikost je omejena na vrstni red sob in širine hodnikov.
+      Da ima FP-001 med čim izbirati, dodaj strukturno različne družine:
+      L-hodnik, dvojna hrbtenica, obodni hodnik, različna števila vrst.
+      Dodaj mero raznolikosti bazena (razdalja med vektorji signalov).
+    next_step: Razširi generateFloorLayoutPool + test mere raznolikosti.
+    depends_on: []
+    acceptance:
+      - Bazen vsebuje vsaj 3 strukturno različne družine tlorisov.
+      - Deduplikacija ostane (ni identičnih kandidatov).
+      - Mera raznolikosti bazena je izračunana in vidna v UI ali logu.
+
+  - id: FP-003
+    title: Aktivno A/B učenje pohištva + prenos naučenega med istovrstnimi sobami
+    status: ready
+    priority: P0
+    effort: M
+    agent: Claude Code
+    spec: >-
+      Korak 3 drill-down danes primerja "trenutno seme vs naslednje seme" —
+      naključni sosedi, brez učenja. Uporabi obstoječi nextPair (engine/active.ts)
+      nad bazenom kandidatov sobe in shrani naučene uteži PER TIP SOBE (wc/office),
+      ne per soba: izbira v eni pisarni izboljša postavitve vseh pisarn.
+    next_step: Poveži searchLayouts bazen z nextPair v RoomDrill + uteži per roomType v localStorage.
+    acceptance:
+      - A/B par v sobi je izbran po informacijskem donosu, ne seed+1.
+      - Izbire v eni pisarni spremenijo rangiranje postavitev v drugih pisarnah.
+      - Uteži per tip sobe se ohranijo čez sejo (localStorage).
+
+  - id: FP-004
+    title: Konvergenca — sistem javi, kdaj je naučeno (etaža + sobe)
+    status: ready
+    priority: P1
+    effort: S
+    agent: Claude Code
+    spec: >-
+      HANDOFF T4: zaznaj umiritev uteži. Po N doslednih izbirah (uteži se
+      spreminjajo < epsilon) sistem javi konvergenco, predlaga prehod na
+      izkoriščanje in neha spraševati. Velja za floor uteži (floorPreference)
+      in per-roomType uteži (FP-003).
+    next_step: Stop pogoj v recordFloorPreference + UI značka "naučeno".
+    depends_on: [FP-001, FP-003]
+    acceptance:
+      - Po N doslednih primerjavah UI pokaže "preference naučene" in ponudi zaključek.
+      - Nedosledne izbire konvergenco upravičeno zamaknejo (test).
+
+  # ── Sklop B: učenje iz naloženih načrtov ─────────────────────────────────
+  - id: FP-005
+    title: Knjižnica referenčnih načrtov (nalaganje, tipiziranje, trajnost)
+    status: ready
+    priority: P1
+    effort: M
+    agent: Claude Code
+    spec: >-
+      Enotno mesto za nalaganje referenčnih načrtov (slika/PDF → AI ekstrakcija
+      → verifikacijski overlay → shranjen NormalizedPlan). Vsaka referenca dobi
+      tip: wc / pisarna / cela etaža / proizvodnja. Trajno shranjeno (localStorage,
+      kasneje backend), reference se lahko doda/odstrani, indukcija se preračuna.
+    next_step: UI knjižnica nad obstoječim claudeExtraction + normalizedPlan tokom.
+    acceptance:
+      - Naložim 3 načrte WC in 2 etaži — vidim jih v knjižnici s tipom in povzetkom.
+      - Odstranitev reference preračuna inducirana pravila brez spremembe kode.
+      - Reference preživijo zaprtje/odprtje aplikacije.
+
+  - id: FP-006
+    title: Indukcija pravil pohištva iz referenc per tip sobe (WC, pisarna)
+    status: ready
+    priority: P1
+    effort: L
+    agent: Claude Code
+    spec: >-
+      Danes so pravila pohištva v presetih hardcodana (floorFurnish.ts,
+      elements/library.ts). HANDOFF T5/O9: iz referenc tipa "wc" oz. "pisarna"
+      izračunaj opazovanja (clearance, odmiki, mere sob) in induciraj Envelope
+      pravila (min→jedro, mediana→halo, p90→nasičenje, varianca→zaupanje),
+      ki jih sobni generator dejansko uporablja. Pravila pregledna in uredljiva
+      (steklena škatla). Ločeni rule-seti per tip sobe.
+    next_step: Razširi rules/induction.ts + ifc/observations.ts na pohištvene parametre in poveži z searchLayouts.
+    depends_on: [FP-005]
+    acceptance:
+      - Zamenjava nabora WC referenc spremeni WC postavitve brez spremembe kode.
+      - Zamenjava WC referenc NE spremeni pravil za pisarne.
+      - Vsako inducirano pravilo cita reference in je ročno popravljivo.
+
+  - id: FP-007
+    title: Etažna indukcija iz načrtov celih etaž + holdout validacija
+    status: ready
+    priority: P1
+    effort: M
+    agent: Claude Code
+    spec: >-
+      Iz referenc tipa "cela etaža" (več WC + pisarn) induciraj etažno strategijo:
+      širine hodnikov, globine sob, razporeditev WC (centralno/razpršeno), cone.
+      Osnova obstaja (ifc/floorStrategy.ts, project/zoneInduction.ts) — razširi
+      na več parametrov in dodaj holdout poročilo (train/test): nauči se na delu
+      referenc, preveri napoved na zadržanih (HANDOFF T6, merilna os a).
+    next_step: Razširi floorStrategy + holdout poročilo v UI faze Šolanje.
+    depends_on: [FP-005]
+    acceptance:
+      - Etažne reference spremenijo rangiranje kandidatov etaže brez spremembe kode.
+      - Holdout poročilo pokaže številko ujemanja za vsak induciran parameter.
+
+  - id: FP-008
+    title: Tri merilne osi kot številke v UI (indukcija, posplošitev, donos preferenc)
+    status: inbox
+    priority: P2
+    effort: S
+    agent: Claude Code
+    spec: >-
+      HANDOFF §5.3: (a) kakovost indukcije na holdout setu, (b) posplošitev na
+      nov brief, (c) donos preferenc — ocena pred in po N A/B primerjavah.
+      Vsaka os ena številka, vidna v UI.
+    depends_on: [FP-006, FP-007]
+    acceptance:
+      - Vse tri osi imajo izračunano številko na demo podatkih.
+
+  # ── Sklop C: proizvodnja — končni cilj ───────────────────────────────────
+  - id: FP-009
+    title: Podatkovni model proizvodnje (prostori, stroji, cone, tokovi)
+    status: inbox
+    priority: P2
+    effort: M
+    agent: Claude Code
+    spec: >-
+      Razširi tipe prostorov: proizvodnja, skladišče, tehnični prostor, garderoba.
+      Stroji/oprema kot elementi z envelope zahtevami (odmiki, servisni dostop,
+      priklopi: elektrika/voda/zrak). GMP cone in tokovi (ljudje/material/odpadki)
+      že obstajajo na večplastni shemi (floorLayers) — poveži jih s proizvodnimi tipi.
+    next_step: Razširi roomTypes.ts + elements/library.ts s proizvodnimi elementi.
+    acceptance:
+      - Brief lahko vsebuje proizvodne prostore s programom strojev.
+      - Stroj ima envelope zahteve in priklopne točke kot obstoječi elementi.
+
+  - id: FP-010
+    title: Uvoz načrta obstoječe proizvodnje → inventar opreme z verifikacijo
+    status: inbox
+    priority: P2
+    effort: L
+    agent: Claude Code
+    spec: >-
+      Iz načrta stare proizvodnje (slika/PDF/IFC) AI ekstrahira prostore in VSO
+      opremo (stroji, mize, regali) z dimenzijami in pozicijami. Human-in-the-loop
+      verifikacija (overlay + popravki) po vzoru obstoječe AI ekstrakcije.
+      Rezultat: inventar opreme kot vhod za selitev.
+    depends_on: [FP-005, FP-009]
+    acceptance:
+      - Iz demo načrta proizvodnje nastane pregledan inventar opreme (tip, mere, soba).
+      - Napačno prepoznan element se da ročno popraviti pred potrditvijo.
+
+  - id: FP-011
+    title: Selitveni engine — stara proizvodnja v nove prostore
+    status: inbox
+    priority: P2
+    effort: L
+    agent: Claude Code
+    spec: >-
+      Končni cilj: engine vzame inventar opreme iz stare proizvodnje (FP-010)
+      in ga razporedi v novo načrtovano etažo (isti pogon: Oreh 2 razporedi
+      prostore, Oreh 1 postavi opremo v vsak prostor), ob spoštovanju con,
+      tokov in envelope pravil. A/B izostritev kot v testnem problemu.
+      Kar ne gre, se jasno javi z razlogom (steklena škatla), ne izpusti tiho.
+    depends_on: [FP-009, FP-010]
+    acceptance:
+      - Demo: stara etaža → nova etaža, vsa oprema postavljena ali izrecno javljena kot neizvedljiva z razlogom.
+      - Tokovi ljudje/material/odpadki so na novi etaži izrisani in ocenjeni.
