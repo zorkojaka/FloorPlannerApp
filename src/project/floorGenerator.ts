@@ -51,6 +51,8 @@ export interface FloorLayoutOptions {
   connectorAt?: number;
   /** okna: prostori z zahtevo po oknu (pisarne) prednostno v zunanje vrste ob fasadi */
   windowAware?: boolean;
+  /** vsili število vzporednih hodnikov (strukturna družina), namesto izračuna iz globine */
+  forceCorridors?: number;
 }
 
 const MAX_CORRIDORS = 4;
@@ -93,7 +95,7 @@ export function generateStripFloorLayout(brief: ProjectBrief, options: FloorLayo
   const minRow = Math.max(...[...presentTypes].map((type) => ROOM_TYPE_DEFINITIONS[type].minDepth), 1.5);
   const cap = Math.max(minRow, opts.maxRoomDepth ?? DEFAULT_MAX_ROOM_DEPTH);
 
-  const plan = planCorridors(Db, mainW, cap, minRow);
+  const plan = planCorridors(Db, mainW, cap, minRow, opts.forceCorridors);
   if (plan.rowDepth < minRow) warnings.push('Boundary depth is too small for corridor.');
 
   // Prečni konektor poveže vzporedne hodnike in doseže vhod; sobe se mu izognejo.
@@ -299,8 +301,9 @@ function touchesBoundary(room: PlacedRoom, boundary: FloorLayout['boundary']): b
   return room.x <= t || room.y <= t || room.x + room.w >= boundary.width - t || room.y + room.d >= boundary.depth - t;
 }
 
-/** Koliko vzporednih hodnikov in kako globoke vrste, da nobena soba ni globlja od cap. */
-function planCorridors(Db: number, mainW: number, cap: number, minRow: number): { corridors: CorridorBand[]; rows: RowSlot[]; rowDepth: number; singleLoaded: boolean } {
+/** Koliko vzporednih hodnikov in kako globoke vrste, da nobena soba ni globlja od cap.
+ * `forceK` vsili število hodnikov (strukturna družina) — zmanjša se le, če vrste ne gredo v globino. */
+function planCorridors(Db: number, mainW: number, cap: number, minRow: number, forceK?: number): { corridors: CorridorBand[]; rows: RowSlot[]; rowDepth: number; singleLoaded: boolean } {
   const corridors: CorridorBand[] = [];
   const rows: RowSlot[] = [];
   // pasove zlagamo po skupni zaokroženi mreži, da robovi sob in hodnikov točno sovpadajo
@@ -324,12 +327,17 @@ function planCorridors(Db: number, mainW: number, cap: number, minRow: number): 
   }
 
   const slabCap = 2 * cap + mainW;
-  let k = Math.max(1, Math.round(Db / slabCap));
-  for (let guard = 0; guard < 8; guard++) {
-    const rowDepth = (Db / k - mainW) / 2;
-    if (rowDepth > cap && k < MAX_CORRIDORS) k++;
-    else if (rowDepth < minRow && k > 1) k--;
-    else break;
+  let k = forceK ? Math.round(forceK) : Math.max(1, Math.round(Db / slabCap));
+  if (forceK) {
+    // vsiljena družina: zmanjšaj samo, dokler vrste ne gredo v globino
+    while (k > 1 && (Db / k - mainW) / 2 < minRow) k--;
+  } else {
+    for (let guard = 0; guard < 8; guard++) {
+      const rowDepth = (Db / k - mainW) / 2;
+      if (rowDepth > cap && k < MAX_CORRIDORS) k++;
+      else if (rowDepth < minRow && k > 1) k--;
+      else break;
+    }
   }
   k = Math.min(MAX_CORRIDORS, Math.max(1, k));
   const slabDepth = Db / k;
@@ -359,11 +367,20 @@ function facingCorridor(room: PlacedRoom, corridors: PlacedRoom[]): Facing | nul
   return null;
 }
 
+type CorridorSide = NonNullable<FloorLayoutOptions['corridorSide']>;
+
+/** Prečna orientacija hodnika — strukturno drugačna družina tlorisa. */
+function perpendicularSide(side: CorridorSide): CorridorSide {
+  if (side === 'south' || side === 'north') return 'west';
+  return 'south';
+}
+
 export function generateFloorLayoutPool(brief: ProjectBrief): FloorLayout[] {
   const variants: FloorLayoutOptions[] = [];
   const sides = brief.entrances?.length ? [sideFromEntrance(normalizeEntrances(brief)[0])] : (['south', 'north'] as const);
   const depthVariants = [DEFAULT_MAX_ROOM_DEPTH, 3.5]; // globlje sobe (manj hodnikov) vs. plitve (več hodnikov)
-  for (const corridorSide of sides as Array<'south' | 'north' | 'west' | 'east'>) {
+  const defaultWidth = normalizeCorridorPolicy(brief).mainWidth;
+  for (const corridorSide of sides as CorridorSide[]) {
     for (const roomOrder of ['program', 'reverse', 'offices-first', 'wc-first'] as const) {
       for (const corridorWidth of corridorWidthVariants(brief)) {
         for (const maxRoomDepth of depthVariants) {
@@ -374,9 +391,24 @@ export function generateFloorLayoutPool(brief: ProjectBrief): FloorLayout[] {
       }
     }
     for (const roomOrder of ['alternating', 'spread-wc', 'zone-cluster'] as const) {
-      const corridorWidth = normalizeCorridorPolicy(brief).mainWidth;
       for (const connectorAt of [0.5, 0.12] as const) {
-        variants.push({ corridorSide, roomOrder, corridorWidth, connectorAt, id: `${corridorSide}-${roomOrder}-${corridorWidth}-conn${connectorAt}` });
+        variants.push({ corridorSide, roomOrder, corridorWidth: defaultWidth, connectorAt, id: `${corridorSide}-${roomOrder}-${defaultWidth}-conn${connectorAt}` });
+      }
+    }
+    // strukturne družine: vsiljeno število vzporednih hodnikov (1/2/3) v OBEH
+    // orientacijah — kar v eni smeri ne gre (plitve vrste), gre pogosto prečno
+    const crossSide = perpendicularSide(corridorSide);
+    for (const side of [corridorSide, crossSide]) {
+      for (const forceCorridors of [1, 2, 3] as const) {
+        for (const windowAware of [false, true] as const) {
+          variants.push({ corridorSide: side, roomOrder: 'program', corridorWidth: defaultWidth, forceCorridors, windowAware, id: `${side === corridorSide ? '' : 'cross-'}${side}-force${forceCorridors}${windowAware ? '-win' : ''}` });
+        }
+      }
+    }
+    // prečna orientacija hodnika: tudi z danim vhodom ponudi pravokotno družino
+    for (const roomOrder of ['program', 'offices-first'] as const) {
+      for (const windowAware of [false, true] as const) {
+        variants.push({ corridorSide: crossSide, roomOrder, corridorWidth: defaultWidth, windowAware, id: `cross-${crossSide}-${roomOrder}${windowAware ? '-win' : ''}` });
       }
     }
   }

@@ -22,9 +22,11 @@ import { downloadBlob, svgToString, planToJson } from "./shared/exportPlan";
 import { ACCESSIBLE_BATHROOM_REFS, CLASSIC_BATHROOM_REFS } from "./training/classicBathroomRefs";
 import { generateFloorLayoutPool } from "./project/floorGenerator";
 import { estimateProjectArea } from "./project/roomTypes";
-import { floorSignals, initialFloorPreferenceState, rankFloorLayouts, recordFloorPreference, scoreFloorLayout } from "./project/floorPreference";
+import { floorSignals, initialFloorPreferenceState, normalizeFloorPreferenceState, rankFloorLayouts, recordFloorPreference, recordFloorEquivalence, scoreFloorLayout } from "./project/floorPreference";
+import { nextFloorPairs, suggestedFloorExplore, structuralFamilies, poolDiversity } from "./project/floorActive";
 import { roomConstraintsFromPlacedRoom } from "./project/roomAdapter";
-import { furnishFloorLayout, FLOOR_FURN_PRESETS, defaultFloorPresetId } from "./project/floorFurnish";
+import { furnishFloorLayout, roomCandidatePool, roomCandidateItems, FLOOR_FURN_PRESETS, defaultFloorPresetId } from "./project/floorFurnish";
+import { initialRoomTypePrefs, prefStateForType, recordRoomTypePreference, recordRoomTypeEquivalence } from "./project/roomTypePreference";
 import { deriveFloorLayers, ZONE_DEFS, zoneFill, zoneLabel } from "./project/floorLayers";
 import { extractFloorStrategyObservations, induceFloorStrategyProfile, rankFloorLayoutsByProfile, scoreFloorLayoutByProfile } from "./ifc/floorStrategy";
 import { IFC_REFERENCE_SETS } from "./training/ifcReferenceSets";
@@ -104,7 +106,8 @@ const DEFAULT_PROJECT = {
 
 function ProjectWorkflow({onContinue}){
   const [brief,setBrief]=usePersistentState("floorplanner.project.brief",DEFAULT_PROJECT);
-  const [pref,setPref]=usePersistentState("floorplanner.project.preference",initialFloorPreferenceState);
+  const [rawPref,setPref]=usePersistentState("floorplanner.project.preference",initialFloorPreferenceState);
+  const [roomPrefs,setRoomPrefs]=usePersistentState("floorplanner.project.roomPrefs",initialRoomTypePrefs);
   const [strategyProfile,setStrategyProfile]=usePersistentState("floorplanner.project.strategyProfile",null);
   const [pairIndex,setPairIndex]=usePersistentState("floorplanner.project.pairIndex",0);
   const [selectedRoomId,setSelectedRoomId]=usePersistentState("floorplanner.project.selectedRoomId",null);
@@ -139,23 +142,32 @@ function ProjectWorkflow({onContinue}){
   const addEntrance=()=>setBrief(b=>({...b,entrances:[...entrances,{id:uid(),wall:"S",position:0.5,width:1.2}]}));
   const removeEntrance=(id)=>setBrief(b=>({...b,entrances:entrances.filter(e=>e.id!==id)}));
   const pool=useMemo(()=>generateFloorLayoutPool(brief),[brief]);
+  const pref=useMemo(()=>normalizeFloorPreferenceState(rawPref),[rawPref]);
   const ranked=useMemo(()=>strategyProfile?rankFloorLayoutsByProfile(pool,strategyProfile):rankFloorLayouts(pool,pref.weights),[pool,pref.weights,strategyProfile]);
   const champion=(pickedLayoutId&&ranked.find(l=>l.id===pickedLayoutId))||(strategyProfile?ranked[0]:(ranked.find(l=>l.id===pref.championId)||ranked[0]));
   const top5=ranked.slice(0,5);
   const scorePct=(l)=>Math.round((strategyProfile?scoreFloorLayoutByProfile(l,strategyProfile):scoreFloorLayout(l,pref.weights))*100);
-  const challengers=ranked.filter(l=>!champion||l.id!==champion.id);
-  const challenger=challengers[pairIndex%Math.max(1,challengers.length)]||ranked[1]||champion;
-  const pair=[champion,challenger].filter(Boolean);
+  // aktivni A/B: pari z največjim informacijskim donosom (najprej raznolike opcije),
+  // s primerjavami explore pada → pozno odloča kvaliteta (izkoriščanje)
+  const floorExplore=suggestedFloorExplore(pref.comparisons);
+  const floorPairs=useMemo(()=>nextFloorPairs(ranked,pref,floorExplore),[ranked,pref,floorExplore]);
+  const activeFloorPair=floorPairs.length?floorPairs[pairIndex%floorPairs.length]:null;
+  const pair=activeFloorPair?[activeFloorPair.a,activeFloorPair.b]:[];
+  const poolFamilies=useMemo(()=>structuralFamilies(pool),[pool]);
+  const poolDiv=useMemo(()=>poolDiversity(pool),[pool]);
   const chooseFloor=(winner,loser)=>{
     if(!winner||!loser) return;
-    setPref(p=>recordFloorPreference(p,winner,loser));
+    setPref(p=>recordFloorPreference(normalizeFloorPreferenceState(p),winner,loser));
     setPairIndex(i=>i+1);
   };
-  const equalFloor=()=>setPairIndex(i=>i+1);
+  const equalFloor=()=>{
+    if(pair.length===2) setPref(p=>recordFloorEquivalence(normalizeFloorPreferenceState(p),pair[0],pair[1]));
+    setPairIndex(i=>i+1);
+  };
   const summary=estimateProjectArea(brief);
   const selectedRoom=champion?.rooms.find(r=>r.id===selectedRoomId)||champion?.rooms[0];
   const furnishOnStep=furnishOn||projektStep>=3;
-  const furnishing=useMemo(()=>furnishOnStep&&champion?furnishFloorLayout(champion,furnChoices):{results:[],items:[]},[furnishOnStep,champion,furnChoices]);
+  const furnishing=useMemo(()=>furnishOnStep&&champion?furnishFloorLayout(champion,furnChoices,roomPrefs):{results:[],items:[]},[furnishOnStep,champion,furnChoices,roomPrefs]);
   const furnRooms=furnishing.results;
   const furnOk=furnRooms.filter(r=>r.status==="found"||r.status==="empty").length;
   // per-soba override (preset/seed/zones) — vrednost furnChoices je lahko string (star zapis) ali objekt
@@ -165,14 +177,20 @@ function ProjectWorkflow({onContinue}){
   const setFurnChoice=(roomId,presetId)=>patchRoom(roomId,{presetId});
   const floorLayers=useMemo(()=>champion?deriveFloorLayers(champion):null,[champion]);
   const activeLayer=furnishOn?"rooms":floorLayer;
-  // drill-down: A/B za izbrano sobo (trenutno seme vs naslednje) — le v koraku Pohištvo
+  // drill-down: aktivni A/B za izbrano sobo — par z največjim informacijskim donosom
+  // iz bazena kandidatov; izbira uči preference PER TIP SOBE (prenos med pisarnami)
   const drillRoom=projektStep>=3?champion?.rooms.find(r=>r.id===selectedRoomId&&r.type!=="corridor"):null;
-  const drillSeed=roomOverride(drillRoom?.id)?.seed||0;
-  const drillAlt=useMemo(()=>{
-    if(!champion||!drillRoom) return null;
-    const f=furnishFloorLayout(champion,{...furnChoices,[drillRoom.id]:{...roomOverride(drillRoom.id),seed:drillSeed+1}});
-    return f.results.find(r=>r.room.id===drillRoom.id);
-  },[champion,drillRoom?.id,furnChoices,drillSeed]);
+  const drillPool=useMemo(()=>champion&&drillRoom?roomCandidatePool(champion,drillRoom,roomOverride(drillRoom.id)):null,[champion,drillRoom?.id,furnChoices]);
+  const drillPrefState=drillRoom?prefStateForType(roomPrefs,drillRoom.type):null;
+  const drillPair=useMemo(()=>{
+    if(!drillPool||!drillPrefState||drillPool.res.candidates.length<2) return null;
+    return nextPair(drillPool.res.candidates,drillPrefState.channels,drillPool.spec.cfg,suggestedExplore(drillPrefState.comparisons));
+  },[drillPool,roomPrefs,drillRoom?.type]);
+  const chooseRoomPair=(winner,loser)=>{
+    if(!drillRoom||!drillPool) return;
+    setRoomPrefs(p=>recordRoomTypePreference(p,drillRoom.type,winner,loser,drillPool.spec.cfg));
+  };
+  const equalRoomPair=()=>{if(drillRoom)setRoomPrefs(p=>recordRoomTypeEquivalence(p,drillRoom.type));};
   const drillCur=drillRoom?furnRooms.find(r=>r.room.id===drillRoom.id):null;
   const exportSvg=()=>{const el=exportRef.current;if(el)downloadBlob(`etaza-${champion?.boundary.width}x${champion?.boundary.depth}.svg`,"image/svg+xml",svgToString(el));};
   const exportJson=()=>{if(champion)downloadBlob(`etaza-${champion.boundary.width}x${champion.boundary.depth}.json`,"application/json",JSON.stringify(planToJson(champion,furnishing,floorLayers),null,2));};
@@ -247,8 +265,11 @@ function ProjectWorkflow({onContinue}){
       <div className="phaseLead">Korak 2 — razporeditev prostorov: zgoraj izberi med 5 najboljšimi, spodaj z A/B primerjavo poišči še boljšo (sistem se uči tvoje preference).</div>
       <div className="floorProgress">
         <span>Kandidati <b className="mono">{pool.length}</b></span>
+        <span>Družine <b className="mono">{poolFamilies.size}</b></span>
+        <span>Raznolikost <b className="mono">{Math.round(poolDiv*100)} %</b></span>
         <span>Primerjave <b className="mono">{pref.comparisons}</b></span>
         <span>Izbrana <b className="mono">{champion?.id||"-"}</b></span>
+        {pref.converged&&<span className="pill">preference naučene ✓</span>}
       </div>
       <div className="eyebrow">Top 5 razporeditev — klikni za izbor</div>
       <div className="top5">
@@ -258,7 +279,12 @@ function ProjectWorkflow({onContinue}){
           <span className="top5Var">{l.variant}</span>
         </button>)}
       </div>
-      <div className="eyebrow mt">Poišči še boljšo (A/B)</div>
+      <div className="eyebrow mt">Poišči še boljšo (A/B) — najprej raznolike opcije, nato fino med dobrimi</div>
+      <div className="floorProgress">
+        <span>informacijski donos para <b className="mono">{activeFloorPair?Math.round(activeFloorPair.info*100):0}</b></span>
+        <span>raziskovanje <b className="mono">{Math.round(floorExplore*100)} %</b></span>
+        {pref.converged&&<span>dovolj primerjav — uteži so umirjene</span>}
+      </div>
       <div className="floorPair">
         {pair.map((layout,i)=><div key={layout.id} className="floorCard">
           <div className="floorHead"><b>{i===0?"A":"B"} · {scorePct(layout)}</b><span>{layout.variant}</span></div>
@@ -283,9 +309,9 @@ function ProjectWorkflow({onContinue}){
         <div className="furnBar"><span className="furnLegend"><i style={{background:"#5b9bd0"}}/>miza <i style={{background:"#89b4da"}}/>stol <i style={{background:"#caa14e"}}/>omara/regal <i style={{background:"#3fb0b0"}}/>WC <i style={{background:"#e2553f"}}/>vrata</span></div>
       </div>
       {drillRoom
-        ? <RoomDrill room={drillRoom} cur={drillCur} alt={drillAlt} preset={roomPreset(drillRoom.id,drillRoom.type)} zones={roomOverride(drillRoom.id).zones||[]}
-            onPreset={p=>setFurnChoice(drillRoom.id,p)} onUseAlt={()=>patchRoom(drillRoom.id,{seed:drillSeed+1})} onZones={z=>patchRoom(drillRoom.id,{zones:z})} onClose={()=>setSelectedRoomId(null)}/>
-        : <div className="softNote">Klikni prostor na tlorisu za per-sobo popravke (A/B postavitev + prepovedane cone).</div>}
+        ? <RoomDrill room={drillRoom} cur={drillCur} pair={drillPair} prefState={drillPrefState} preset={roomPreset(drillRoom.id,drillRoom.type)} zones={roomOverride(drillRoom.id).zones||[]}
+            onPreset={p=>setFurnChoice(drillRoom.id,p)} onChoose={chooseRoomPair} onEqual={equalRoomPair} onZones={z=>patchRoom(drillRoom.id,{zones:z})} onClose={()=>setSelectedRoomId(null)}/>
+        : <div className="softNote">Klikni prostor na tlorisu za per-sobo popravke (A/B postavitev + prepovedane cone). Izbire se učijo za TIP sobe — boljša pisarna izboljša vse pisarne.</div>}
       <div className="phaseCta"><button className="ctaNext" onClick={()=>setProjektStep(4)}>Naprej → Pregled in izvoz</button></div>
     </div>}
 
@@ -320,23 +346,33 @@ function ProjectWorkflow({onContinue}){
   </div>;
 }
 
-// Per-soba drill-down (Korak 3): A/B postavitve pohištva + prepovedane cone.
-function RoomDrill({room,cur,alt,preset,zones,onPreset,onUseAlt,onZones,onClose}){
+// Per-soba drill-down (Korak 3): aktivni A/B pohištva (informacijski donos) +
+// prepovedane cone. Izbira uči preference PER TIP SOBE → prenos na istovrstne sobe.
+function RoomDrill({room,cur,pair,prefState,preset,zones,onPreset,onChoose,onEqual,onZones,onClose}){
   const GX=4,GY=3,mmW=Math.round(room.w*1000),mmH=Math.round(room.d*1000);
   const cellW=mmW/GX,cellH=mmH/GY;
   const cellZone=(gx,gy)=>({x:Math.round(gx*cellW),y:Math.round(gy*cellH),w:Math.round(cellW),h:Math.round(cellH)});
   const isOn=(gx,gy)=>{const c=cellZone(gx,gy);return zones.some(z=>Math.abs(z.x-c.x)<2&&Math.abs(z.y-c.y)<2);};
   const toggle=(gx,gy)=>{const c=cellZone(gx,gy);onZones(isOn(gx,gy)?zones.filter(z=>!(Math.abs(z.x-c.x)<2&&Math.abs(z.y-c.y)<2)):[...zones,c]);};
+  const pairItems=(cand)=>cand?roomCandidateItems(room,cand):[];
   return <div className="roomDrill">
     <div className="roomDrillHead"><b>{room.name}</b><span>{room.w.toFixed(1)}×{room.d.toFixed(1)} m</span>
       <select value={preset} onChange={e=>onPreset(e.target.value)}>{FLOOR_FURN_PRESETS.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}</select>
+      <span className="mono">{prefState?.comparisons||0} primerjav ({room.type})</span>
+      {prefState?.converged&&<span className="pill">naučeno za ta tip ✓</span>}
       <button className="champStay" onClick={onClose}>zapri ×</button>
     </div>
     <div className="roomDrillBody">
       <div className="roomAB">
-        <div className="roomABcard on"><div className="floorHead"><b>Trenutna</b></div><RoomMiniSvg room={room} items={cur?.items||[]} zones={zones}/></div>
-        <div className="roomABcard"><div className="floorHead"><b>Predlog (A/B)</b><button className="regen" onClick={onUseAlt}>uporabi ta</button></div><RoomMiniSvg room={room} items={alt?.items||[]} zones={zones}/></div>
+        <div className="roomABcard on"><div className="floorHead"><b>Trenutna (po naučenem)</b></div><RoomMiniSvg room={room} items={cur?.items||[]} zones={zones}/></div>
+        {pair
+          ? <>
+              <div className="roomABcard"><div className="floorHead"><b>A</b><button className="regen" onClick={()=>onChoose(pair.a,pair.b)}>A je boljša</button></div><RoomMiniSvg room={room} items={pairItems(pair.a)} zones={zones}/></div>
+              <div className="roomABcard"><div className="floorHead"><b>B</b><button className="regen" onClick={()=>onChoose(pair.b,pair.a)}>B je boljša</button></div><RoomMiniSvg room={room} items={pairItems(pair.b)} zones={zones}/></div>
+            </>
+          : <div className="softNote">Za A/B ni dovolj različnih kandidatov.</div>}
       </div>
+      {pair&&<div className="abChoiceBtns"><button className="champStay" onClick={onEqual}>enakovredni</button><span className="mono">donos para {Math.round(pair.info*100)}</span></div>}
       <div className="roomZones">
         <div className="eyebrow">Prepovedane cone — klikni celico</div>
         <RoomMiniSvg room={room} items={cur?.items||[]} zones={zones} grid={{GX,GY,isOn,toggle}}/>
@@ -1827,8 +1863,10 @@ input[type=range]{width:100%;accent-color:var(--cy);height:4px}
 .roomDrill{background:var(--panel);border:1px solid var(--cy);border-radius:8px;overflow:hidden}
 .roomDrillHead{display:flex;align-items:center;gap:10px;padding:9px 11px;border-bottom:1px solid var(--bd);font-size:12px}.roomDrillHead span{color:var(--mut);font-size:10px}.roomDrillHead select{margin-left:auto}
 .roomDrillBody{display:grid;grid-template-columns:1fr 260px;gap:12px;padding:12px}
-.roomAB{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.roomAB{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
 .roomABcard{border:1px solid var(--bd);border-radius:7px;overflow:hidden}.roomABcard.on{border-color:#2f7d3f}
+.roomABcard .regen{width:auto;margin-top:0;padding:4px 10px;font-size:11px}
+.roomDrill .abChoiceBtns{display:flex;align-items:center;gap:10px;margin:8px 0 12px}.roomDrill .abChoiceBtns button{height:30px}
 .roomMini{width:100%;height:170px;background:#f6f7f3;display:block}
 .roomZones{border-left:1px solid var(--bd);padding-left:12px}
 @media(max-width:900px){.step1grid,.roomDrillBody{grid-template-columns:1fr}.wizSteps{grid-template-columns:1fr 1fr}.top5{grid-template-columns:1fr 1fr}}

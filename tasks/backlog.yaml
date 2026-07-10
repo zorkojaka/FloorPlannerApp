@@ -17,7 +17,7 @@ tasks:
   # ── Sklop A: testni problem — pametnejši A/B izbor ──────────────────────
   - id: FP-001
     title: Aktivni izbor A/B parov na nivoju etaže (najprej raznolike opcije)
-    status: ready
+    status: done
     priority: P0
     effort: M
     agent: Claude Code
@@ -28,7 +28,7 @@ tasks:
       Prenesi isti princip na FloorLayout: signali iz floorSignals() postanejo
       kanali z negotovostjo, par se izbere po največjem razdvoju negotovosti
       (explore) in postopno prehaja na kvaliteto (exploit, suggestedExplore).
-    next_step: Nov modul src/project/floorActive.ts + zamenjava champion-vs-next logike v koraku 2.
+    next_step: Izvedeno 2026-07-10 — src/project/floorActive.ts (nextFloorPairs, informacijski donos, zaupanje signalov), korak 2 kaže donos + raziskovanje; E2E preverjeno s Playwright.
     acceptance:
       - Prvi pari se med seboj razlikujejo po signalih bolj kot baseline prvak-vs-naslednji (test s povprečno razdaljo signalov).
       - Po ~10 primerjavah sistem prikazuje pare visoke kvalitete (izkoriščanje).
@@ -36,7 +36,7 @@ tasks:
 
   - id: FP-002
     title: Raznolikost bazena kandidatov etaže (strukturno različne družine)
-    status: ready
+    status: done
     priority: P0
     effort: M
     agent: Claude Code
@@ -46,7 +46,7 @@ tasks:
       Da ima FP-001 med čim izbirati, dodaj strukturno različne družine:
       L-hodnik, dvojna hrbtenica, obodni hodnik, različna števila vrst.
       Dodaj mero raznolikosti bazena (razdalja med vektorji signalov).
-    next_step: Razširi generateFloorLayoutPool + test mere raznolikosti.
+    next_step: Izvedeno 2026-07-10 — forceCorridors (1/2/3 hodniki) + prečna orientacija v generateFloorLayoutPool; structuralFamilies + poolDiversity v UI (korak 2).
     depends_on: []
     acceptance:
       - Bazen vsebuje vsaj 3 strukturno različne družine tlorisov.
@@ -55,7 +55,7 @@ tasks:
 
   - id: FP-003
     title: Aktivno A/B učenje pohištva + prenos naučenega med istovrstnimi sobami
-    status: ready
+    status: done
     priority: P0
     effort: M
     agent: Claude Code
@@ -64,7 +64,7 @@ tasks:
       naključni sosedi, brez učenja. Uporabi obstoječi nextPair (engine/active.ts)
       nad bazenom kandidatov sobe in shrani naučene uteži PER TIP SOBE (wc/office),
       ne per soba: izbira v eni pisarni izboljša postavitve vseh pisarn.
-    next_step: Poveži searchLayouts bazen z nextPair v RoomDrill + uteži per roomType v localStorage.
+    next_step: Izvedeno 2026-07-10 — src/project/roomTypePreference.ts (kanali per tip sobe), roomCandidatePool + rangiranje v furnishFloorLayout, RoomDrill z A/B parom po informacijskem donosu.
     acceptance:
       - A/B par v sobi je izbran po informacijskem donosu, ne seed+1.
       - Izbire v eni pisarni spremenijo rangiranje postavitev v drugih pisarnah.
@@ -72,7 +72,7 @@ tasks:
 
   - id: FP-004
     title: Konvergenca — sistem javi, kdaj je naučeno (etaža + sobe)
-    status: ready
+    status: done
     priority: P1
     effort: S
     agent: Claude Code
@@ -81,7 +81,7 @@ tasks:
       spreminjajo < epsilon) sistem javi konvergenco, predlaga prehod na
       izkoriščanje in neha spraševati. Velja za floor uteži (floorPreference)
       in per-roomType uteži (FP-003).
-    next_step: Stop pogoj v recordFloorPreference + UI značka "naučeno".
+    next_step: Izvedeno 2026-07-10 — lastDeltas + converged v floorPreference in roomTypePreference, "enakovredni" šteje k umiritvi, UI značke "preference naučene ✓".
     depends_on: [FP-001, FP-003]
     acceptance:
       - Po N doslednih primerjavah UI pokaže "preference naučene" in ponudi zaključek.

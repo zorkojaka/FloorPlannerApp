@@ -8,13 +8,15 @@
  * opremo pa nazaj ÷1000 in zamaknemo za pozicijo sobe.
  */
 
-import type { ProgramInstance } from '../constraints/brief';
+import type { ProgramInstance, RoomConfig } from '../constraints/brief';
 import type { PlacedElement } from '../engine/evaluator';
-import { searchLayouts } from '../engine/generator';
+import { searchLayouts, type GenerateResult, type LayoutCandidate } from '../engine/generator';
+import { rankByChannels } from '../engine/channels';
 import type { Wall } from '../elements/model';
 import { baseLib } from '../elements/library';
 import type { FloorLayout, PlacedRoom } from './floorGenerator';
 import type { RoomType } from './roomTypes';
+import { channelsForType, type RoomTypePrefs } from './roomTypePreference';
 
 export interface FloorFurnItem {
   roomId: string;
@@ -163,48 +165,88 @@ export interface RoomOverride {
 
 export type RoomChoice = string | RoomOverride;
 
+/** Iskalna specifikacija sobe: program, konfiguracija in deterministično seme. */
+export interface RoomSearchSpec {
+  program: ProgramInstance[];
+  cfg: RoomConfig;
+  seed: number;
+  presetId: string;
+  fixtureKeys: string[];
+  zones?: RoomNoGoZone[];
+}
+
+export function roomSearchSpec(layout: FloorLayout, room: PlacedRoom, override: RoomOverride = {}): RoomSearchSpec {
+  const corridors = [layout.corridor, ...(layout.corridorLinks || [])].filter(Boolean);
+  const index = Math.max(0, layout.rooms.findIndex((r) => r.id === room.id));
+  const presetId = override.presetId ?? defaultFloorPresetId(room.type);
+  const fixtureKeys = findFloorPreset(presetId).fixtures(room);
+
+  const doorSide = room.doorSide ?? corridorWall(room, corridors);
+  const wallLenM =
+    doorSide === 'N' || doorSide === 'S'
+      ? room.w
+      : doorSide === 'E' || doorSide === 'W'
+        ? room.d
+        : Math.max(room.w, room.d);
+  const doorW = clamp(Math.min(900, wallLenM * 1000 - 300), 600, 900);
+
+  return {
+    program: [
+      { id: `${room.id}-door`, key: 'door', w: doorW, dir: 'inward', wall: doorSide, hinge: 'auto' },
+      ...fixtureKeys.map((key, i) => ({ id: `${room.id}-fx${i}`, key })),
+    ],
+    cfg: { W: Math.round(room.w * 1000), D: Math.round(room.d * 1000), wetWall: 'S', minAisle: 700 },
+    seed: 9973 * (index + 1) + Math.round(room.w * 1000) + (override.seed || 0) * 7919,
+    presetId,
+    fixtureKeys,
+    zones: override.zones,
+  };
+}
+
+/** Bazen kandidatov postavitve za eno sobo — vhod za A/B aktivno učenje (Korak 3). */
+export function roomCandidatePool(
+  layout: FloorLayout,
+  room: PlacedRoom,
+  override: RoomOverride = {},
+  samples = 240,
+): { res: GenerateResult; spec: RoomSearchSpec } {
+  const spec = roomSearchSpec(layout, room, override);
+  const res = searchLayouts({
+    library: baseLib(),
+    program: spec.program,
+    cfg: spec.cfg,
+    soft: true,
+    minPathWidth: 550,
+    samples,
+    zones: spec.zones,
+    random: mulberry32(spec.seed),
+  });
+  return { res, spec };
+}
+
+/** Kandidat sobe → oprema v svetovnih koordinatah etaže (za izris para v UI). */
+export function roomCandidateItems(room: PlacedRoom, candidate: LayoutCandidate): FloorFurnItem[] {
+  return toFloorItems(room, candidate.placed);
+}
+
 export function furnishFloorLayout(
   layout: FloorLayout,
   choices: Record<string, RoomChoice>,
+  prefs?: RoomTypePrefs,
 ): FloorFurnishing {
-  const library = baseLib();
-  const corridors = [layout.corridor, ...(layout.corridorLinks || [])].filter(Boolean);
   const results: RoomFurnResult[] = [];
 
-  layout.rooms.forEach((room, index) => {
+  layout.rooms.forEach((room) => {
     if (room.type === 'corridor') return;
 
     const raw = choices[room.id];
     const override: RoomOverride = typeof raw === 'string' ? { presetId: raw } : raw || {};
-    const presetId = override.presetId ?? defaultFloorPresetId(room.type);
-    const fixtureKeys = findFloorPreset(presetId).fixtures(room);
+    const { res, spec } = roomCandidatePool(layout, room, override);
+    const { presetId, fixtureKeys, cfg } = spec;
 
-    const doorSide = room.doorSide ?? corridorWall(room, corridors);
-    const wallLenM =
-      doorSide === 'N' || doorSide === 'S'
-        ? room.w
-        : doorSide === 'E' || doorSide === 'W'
-          ? room.d
-          : Math.max(room.w, room.d);
-    const doorW = clamp(Math.min(900, wallLenM * 1000 - 300), 600, 900);
-
-    const program: ProgramInstance[] = [
-      { id: `${room.id}-door`, key: 'door', w: doorW, dir: 'inward', wall: doorSide, hinge: 'auto' },
-      ...fixtureKeys.map((key, i) => ({ id: `${room.id}-fx${i}`, key })),
-    ];
-
-    const res = searchLayouts({
-      library,
-      program,
-      cfg: { W: Math.round(room.w * 1000), D: Math.round(room.d * 1000), wetWall: 'S', minAisle: 700 },
-      soft: true,
-      minPathWidth: 550,
-      samples: 240,
-      zones: override.zones,
-      random: mulberry32(9973 * (index + 1) + Math.round(room.w * 1000) + (override.seed || 0) * 7919),
-    });
-
-    const best = res.candidates[0];
+    // naučene preference tipa sobe rangirajo bazen — izbire v eni pisarni izboljšajo vse pisarne
+    const channels = prefs ? channelsForType(prefs, room.type) : null;
+    const best = channels && res.candidates.length > 1 ? rankByChannels(res.candidates, channels, cfg)[0] : res.candidates[0];
     if (best) {
       results.push({
         room,

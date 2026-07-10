@@ -10,10 +10,25 @@ export interface FloorPreferenceWeights {
   windowAccess: number;
 }
 
+export const FLOOR_SIGNAL_KEYS = [
+  'compactness',
+  'corridorEfficiency',
+  'wetGrouping',
+  'officeFrontage',
+  'zoneContiguity',
+  'windowAccess',
+] as const satisfies ReadonlyArray<keyof FloorPreferenceWeights>;
+
 export interface FloorPreferenceState {
   weights: FloorPreferenceWeights;
   comparisons: number;
   championId?: string;
+  /** zaupanje per signal (0..1): koliko primerjav je ta signal že razdvojilo — nizko = negotov */
+  confidence: FloorPreferenceWeights;
+  /** velikosti zadnjih sprememb uteži (za zaznavo umiritve) */
+  lastDeltas: number[];
+  /** uteži so se umirile — sistem ne rabi več spraševati */
+  converged: boolean;
 }
 
 export const DEFAULT_FLOOR_WEIGHTS: FloorPreferenceWeights = {
@@ -25,8 +40,45 @@ export const DEFAULT_FLOOR_WEIGHTS: FloorPreferenceWeights = {
   windowAccess: 0.16,
 };
 
+const INITIAL_CONFIDENCE = 0.15;
+const CONVERGE_MIN_COMPARISONS = 6;
+const CONVERGE_STREAK = 4;
+const CONVERGE_EPS = 0.015;
+const DELTA_HISTORY = 6;
+
 export function initialFloorPreferenceState(): FloorPreferenceState {
-  return { weights: { ...DEFAULT_FLOOR_WEIGHTS }, comparisons: 0 };
+  return {
+    weights: { ...DEFAULT_FLOOR_WEIGHTS },
+    comparisons: 0,
+    confidence: uniformSignals(INITIAL_CONFIDENCE),
+    lastDeltas: [],
+    converged: false,
+  };
+}
+
+/** Migracija stanja iz shrambe: starejši zapisi nimajo zaupanja/konvergence. */
+export function normalizeFloorPreferenceState(raw: Partial<FloorPreferenceState> | null | undefined): FloorPreferenceState {
+  const initial = initialFloorPreferenceState();
+  if (!raw) return initial;
+  return {
+    weights: { ...initial.weights, ...(raw.weights || {}) },
+    comparisons: raw.comparisons ?? 0,
+    championId: raw.championId,
+    confidence: { ...initial.confidence, ...(raw.confidence || {}) },
+    lastDeltas: Array.isArray(raw.lastDeltas) ? raw.lastDeltas.slice(-DELTA_HISTORY) : [],
+    converged: raw.converged ?? false,
+  };
+}
+
+function uniformSignals(value: number): FloorPreferenceWeights {
+  return {
+    compactness: value,
+    corridorEfficiency: value,
+    wetGrouping: value,
+    officeFrontage: value,
+    zoneContiguity: value,
+    windowAccess: value,
+  };
 }
 
 export function scoreFloorLayout(layout: FloorLayout, weights: FloorPreferenceWeights = DEFAULT_FLOOR_WEIGHTS): number {
@@ -55,19 +107,59 @@ export function rankFloorLayouts(layouts: FloorLayout[], weights: FloorPreferenc
 }
 
 export function recordFloorPreference(state: FloorPreferenceState, selected: FloorLayout, rejected: FloorLayout): FloorPreferenceState {
+  const base = normalizeFloorPreferenceState(state);
   const selectedSignals = floorSignals(selected);
   const rejectedSignals = floorSignals(rejected);
-  const next = { ...state.weights };
-  for (const key of Object.keys(next) as Array<keyof FloorPreferenceWeights>) {
+  const next = { ...base.weights };
+  for (const key of FLOOR_SIGNAL_KEYS) {
     next[key] = Math.max(0.05, next[key] + (selectedSignals[key] - rejectedSignals[key]) * 0.08);
   }
   const total = Object.values(next).reduce((sum, value) => sum + value, 0) || 1;
-  for (const key of Object.keys(next) as Array<keyof FloorPreferenceWeights>) next[key] /= total;
+  for (const key of FLOOR_SIGNAL_KEYS) next[key] /= total;
+  // primerjava je "izprašala" signale, po katerih se je par razlikoval → zaupanje vanje zraste
+  const confidence = bumpConfidence(base.confidence, selectedSignals, rejectedSignals);
+  const delta = FLOOR_SIGNAL_KEYS.reduce((sum, key) => sum + Math.abs(next[key] - base.weights[key]), 0);
+  const lastDeltas = [...base.lastDeltas, delta].slice(-DELTA_HISTORY);
   return {
     weights: next,
-    comparisons: state.comparisons + 1,
+    comparisons: base.comparisons + 1,
     championId: selected.id,
+    confidence,
+    lastDeltas,
+    converged: isSettled(base.comparisons + 1, lastDeltas),
   };
+}
+
+/**
+ * "Enakovredni": tudi to je informacija — signali, po katerih se par razlikuje,
+ * uporabniku očitno niso pomembni, zato zaupanje vanje zraste, uteži pa mirujejo.
+ */
+export function recordFloorEquivalence(state: FloorPreferenceState, a: FloorLayout, b: FloorLayout): FloorPreferenceState {
+  const base = normalizeFloorPreferenceState(state);
+  const confidence = bumpConfidence(base.confidence, floorSignals(a), floorSignals(b));
+  const lastDeltas = [...base.lastDeltas, 0].slice(-DELTA_HISTORY);
+  return {
+    ...base,
+    comparisons: base.comparisons + 1,
+    confidence,
+    lastDeltas,
+    converged: isSettled(base.comparisons + 1, lastDeltas),
+  };
+}
+
+function bumpConfidence(confidence: FloorPreferenceWeights, a: FloorPreferenceWeights, b: FloorPreferenceWeights): FloorPreferenceWeights {
+  const next = { ...confidence };
+  for (const key of FLOOR_SIGNAL_KEYS) {
+    const spread = Math.min(1, Math.abs(a[key] - b[key]) * 2);
+    next[key] = clamp01(next[key] + (1 - next[key]) * spread * 0.35);
+  }
+  return next;
+}
+
+function isSettled(comparisons: number, lastDeltas: number[]): boolean {
+  if (comparisons < CONVERGE_MIN_COMPARISONS) return false;
+  const recent = lastDeltas.slice(-CONVERGE_STREAK);
+  return recent.length >= CONVERGE_STREAK && recent.every((delta) => delta < CONVERGE_EPS);
 }
 
 export function floorSignals(layout: FloorLayout): FloorPreferenceWeights {
